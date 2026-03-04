@@ -1,4 +1,4 @@
-# Local AI Note Taker by Serhat
+# Local AI Note Taker
 ### Powered by AMD NPU · FastFlowLM · Whisper · Gemma3
 
 🌍 **[Türkçe versiyon için aşağı kaydırın](#-türkçe)**
