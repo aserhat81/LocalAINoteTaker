@@ -15,7 +15,7 @@ class AudioCaptureManager(QObject):
         super().__init__()
         self.p = pyaudio.PyAudio()
         self.is_recording = False
-        self.chunk_duration = 5 
+        self.chunk_duration = 10  # 10 saniye → Whisper için daha fazla bağlam = daha iyi doğruluk
         
         self.mic_stream = None
         self.sys_stream = None
@@ -147,8 +147,8 @@ class AudioCaptureManager(QObject):
             shorts = struct.unpack(f"<{count}h", data)
             peak = max(abs(s) for s in shorts)
             if peak > 0:
-                # Maksimum hassasiyet için peak'i direkt düz oranlıyoruz
-                return min(100, max(1, int((peak / 10000.0) * 100)))
+                # max(0,...) kullanıyoruz → gerçek sessizlik (peak=0) kesinlikle 0 dönsün
+                return min(100, max(0, int((peak / 10000.0) * 100)))
             return 0
         except Exception:
             return 0
@@ -192,7 +192,8 @@ class AudioCaptureManager(QObject):
                     last_ui_update = now
 
                 if now - last_chunk_time >= self.chunk_duration:
-                    if frames and max_chunk_level >= 1:
+                    # Eşik 4: oda gürültüsü / klima hum'ı filtrelenir, insan sesi geçer
+                    if frames and max_chunk_level >= 4:
                         wav_bytes = self._frames_to_wav(frames, channels, self.p.get_sample_size(FORMAT), rate)
                         self.chunk_ready.emit(wav_bytes, "BEN")
                     frames.clear()
@@ -227,7 +228,7 @@ class AudioCaptureManager(QObject):
                 
                 now = time.time()
                 if now - last_chunk_time >= self.chunk_duration:
-                    if frames and max_chunk_level >= 1:
+                    if frames and max_chunk_level >= 4:
                         wav_bytes = self._frames_to_wav(frames, channels, self.p.get_sample_size(FORMAT), rate)
                         self.chunk_ready.emit(wav_bytes, "DİĞER")
                     frames.clear()

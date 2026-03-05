@@ -5,11 +5,13 @@ class AsrClientThread(QThread):
     transcription_ready = Signal(str, str) # text, source_label ("BEN" or "DİĞER")
     transcription_error = Signal(str)
 
-    # Whisper boşluk/sessizlik halüsinasyonları
+    # Whisper boşluk/sessizlik halüsinasyonları — genişletildi
     HALLUCINATIONS = [
         "...", "Thank you", "Okay", "Okay.", "ok.", "Teşekkürler", "Altyazı",
         "Amara.org", "by Amara.org", "Thank you.", "Thanks.", "You're welcome.",
-        "Sağ olun.", "Görüşmek üzere."
+        "Sağ olun.", "Görüşmek üzere.", "E aí", "E aí.", "Продолжение следует",
+        "Subtitrare realizată de", "Vă mulțumesc", "продолжение следует",
+        "www.subtitle-tools.com", "Subtitles by", "Translated by",
     ]
 
     def __init__(self, wav_bytes, source_label, language="tr"):
@@ -21,11 +23,16 @@ class AsrClientThread(QThread):
 
     def is_hallucination(self, text):
         t = text.strip()
-        # Sadece noktalar veya boşluklardan ibaretse
         clean = t.replace(".", "").replace(" ", "").replace("\n", "")
         if not clean:
             return True
-        # Bilinen tekrar kalıpları kontrolü (hepsi "Okay." mi mesela)
+        # Kiril alfabesi içeriyorsa (Rusça halüsinasyon) filtrele
+        if any('\u0400' <= c <= '\u04FF' for c in t):
+            return True
+        # Portekizce "E aí" tekrarı
+        if t.startswith("E aí") or t.count("E aí") >= 2:
+            return True
+        # Tek kelime tekrarı
         words = set(w.strip(".,!?").lower() for w in t.split())
         if len(words) == 1 and list(words)[0] in ["okay", "ok", "thank", "thanks"]:
             return True
@@ -40,9 +47,9 @@ class AsrClientThread(QThread):
                 'file': ('chunk.wav', self.wav_bytes, 'audio/wav')
             }
             data = {
-                'model': 'whisper-v3',  
-                'response_format': 'json'
-                # language parametresi kapatıldı: yerel model bu parametreyle saçmalıyor (pwie vb.)
+                'model': 'whisper-v3',
+                'response_format': 'json',
+                'language': self.language,   # Dil sabit → tahmin yükü yok, doğruluk artar
             }
             
             response = requests.post(self.api_url, files=files, data=data, timeout=60)

@@ -207,6 +207,7 @@ class MainWindow(QMainWindow):
 
         self.asr_threads = []   # Güçlü referans listesi
         self.asr_queue = []     # İşlem sırası kuyruğu
+        self.meeting_active = False  # True iken ses paketleri işlenir
         self.llm_thread = None
         self.full_transcript_buffer = ""
 
@@ -421,6 +422,7 @@ class MainWindow(QMainWindow):
             else:
                 self.subtitle_box.append("<br><i>[Kayıt Devam Ediyor]</i><br>")
                 
+            self.meeting_active = True
             self.audio_manager.start_recording(mode, self.mic_combo.currentData())
             self.btn_start_record.setText(self.t("btn_pause_rec"))
             self.btn_start_record.setStyleSheet("background-color: #F9E2AF; color: #11111B;")
@@ -434,6 +436,8 @@ class MainWindow(QMainWindow):
             self.subtitle_box.append("<i>[Kayıt Duraklatıldı]</i>")
 
     def finish_meeting(self):
+        self.meeting_active = False   # Bundan sonra gelen ses paketleri işlenmeyecek
+        self.asr_queue.clear()        # Kuyruktaki bekleyen paketleri temizle
         self.audio_manager.stop_recording()
         self.btn_start_record.setText(self.t("btn_new_rec"))
         self.btn_start_record.setStyleSheet("background-color: #89B4FA; color: #11111B;")
@@ -473,6 +477,9 @@ class MainWindow(QMainWindow):
     # ─── ASR ─────────────────────────────────────────────────────────────────
 
     def on_audio_chunk_ready(self, wav_bytes, source_label):
+        # Toplantı bitti ise (finish_meeting çağrıldıysa) ses paketlerini yok say
+        if not self.meeting_active:
+            return
         # Paketleri sıraya al (Queue)
         self.asr_queue.append((wav_bytes, source_label))
         self._process_asr_queue()
