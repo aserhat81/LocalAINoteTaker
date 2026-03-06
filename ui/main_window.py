@@ -593,16 +593,11 @@ class HistoryDialog(QDialog):
         self.search_box.returnPressed.connect(self.load_meetings)
         filter_layout.addWidget(self.search_box)
         
-        # Tarih filtresi
-        self.chk_filter = QCheckBox(t["filter_all"])
-        self.chk_filter.setChecked(True)
-        self.chk_filter.setStyleSheet("color: #CDD6F4; font-size: 12px;")
-        filter_layout.addWidget(self.chk_filter)
-        
+        # Tarih filtresi (Varsayılan olarak son 5 gün görünür ve etkindir)
         dates_layout = QHBoxLayout()
         self.date_from = QDateEdit()
         self.date_from.setCalendarPopup(True)
-        self.date_from.setDate(QDate.currentDate().addDays(-7))
+        self.date_from.setDate(QDate.currentDate().addDays(-5))
         self.date_from.setStyleSheet("background-color: #181825; color: #CDD6F4; border: 1px solid #45475A;")
         
         self.date_to = QDateEdit()
@@ -612,10 +607,6 @@ class HistoryDialog(QDialog):
         
         dates_layout.addWidget(self.date_from)
         dates_layout.addWidget(self.date_to)
-        
-        self.date_from.setEnabled(False)
-        self.date_to.setEnabled(False)
-        self.chk_filter.toggled.connect(lambda checked: (self.date_from.setEnabled(not checked), self.date_to.setEnabled(not checked)))
 
         self.btn_filter = QPushButton(t["filter_btn"])
         self.btn_filter.setStyleSheet("background-color: #313244; color: #CDD6F4; padding: 4px; border-radius: 4px;")
@@ -719,11 +710,8 @@ class HistoryDialog(QDialog):
     def load_meetings(self):
         self.list_widget.clear()
         
-        start_date = None
-        end_date = None
-        if not self.chk_filter.isChecked():
-            start_date = self.date_from.date().toString("yyyy-MM-dd")
-            end_date = self.date_to.date().toString("yyyy-MM-dd")
+        start_date = self.date_from.date().toString("yyyy-MM-dd")
+        end_date = self.date_to.date().toString("yyyy-MM-dd")
             
         search_term = self.search_box.text().strip()
         if not search_term:
