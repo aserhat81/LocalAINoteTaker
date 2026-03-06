@@ -166,7 +166,7 @@ class LlmAnalyzerThread(QThread):
             "max_tokens": max_tokens,
             "chat_template_kwargs": {"enable_thinking": False}
         }
-        response = requests.post(self.api_url, json=data, timeout=360)
+        response = requests.post(self.api_url, json=data, timeout=18000)
         if response.status_code == 200:
             result = response.json()
             return result['choices'][0]['message']['content']

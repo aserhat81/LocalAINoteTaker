@@ -52,7 +52,7 @@ class AsrClientThread(QThread):
                 'language': self.language,
             }
             
-            response = requests.post(self.api_url, files=files, data=data, timeout=60)
+            response = requests.post(self.api_url, files=files, data=data, timeout=18000)
             if response.status_code == 200:
                 result = response.json()
                 text = result.get('text', '').strip()
