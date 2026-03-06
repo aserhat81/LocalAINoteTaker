@@ -157,9 +157,13 @@ class AudioCaptureManager(QObject):
         CHUNK = 4096
         FORMAT = pyaudio.paInt16
         frames = []
-        last_chunk_time = time.time()
         last_ui_update = time.time()
         max_chunk_level = 0
+        
+        # VAD variables
+        is_speaking = False
+        last_speech_time = time.time()
+        chunk_start_time = time.time()
 
         while self.is_recording and stream and stream.is_active():
             try:
@@ -184,6 +188,14 @@ class AudioCaptureManager(QObject):
                 frames.append(data)
                 
                 level = self._calculate_level(data)
+                
+                if level >= 4:
+                    if not is_speaking:
+                        is_speaking = True
+                        if len(frames) == 1:
+                            chunk_start_time = now # Ses gelmeye yeni başladı
+                    last_speech_time = now
+                    
                 if level > max_chunk_level: 
                     max_chunk_level = level
                 
@@ -191,14 +203,36 @@ class AudioCaptureManager(QObject):
                     self.audio_level.emit(level)
                     last_ui_update = now
 
-                if now - last_chunk_time >= self.chunk_duration:
-                    # Eşik 4: oda gürültüsü / klima hum'ı filtrelenir, insan sesi geçer
+                chunk_duration = now - chunk_start_time
+                silence_duration = now - last_speech_time
+                
+                # Eğer kayıt boş boş devam ediyorsa temizle (hafıza şişmesin)
+                if not is_speaking and chunk_duration > 3.0:
+                    frames.clear()
+                    max_chunk_level = 0
+                    chunk_start_time = now
+                    last_speech_time = now
+                    continue
+
+                # Kesit tamamlama koşulları:
+                # 1. Biri konuştuysa ve sonrasında 1 saniye sessizlik olduysa
+                # 2. VEYA biri hiç durmadan 15 saniyeden fazla konuştuysa (hard limit)
+                should_emit = False
+                if is_speaking and silence_duration >= 1.0:
+                    should_emit = True
+                elif is_speaking and chunk_duration >= 15.0:
+                    should_emit = True
+                    
+                if should_emit:
                     if frames and max_chunk_level >= 4:
                         wav_bytes = self._frames_to_wav(frames, channels, self.p.get_sample_size(FORMAT), rate)
                         self.chunk_ready.emit(wav_bytes, "BEN")
                     frames.clear()
                     max_chunk_level = 0
-                    last_chunk_time = now
+                    is_speaking = False
+                    chunk_start_time = now
+                    last_speech_time = now
+
             except Exception as e:
                 time.sleep(0.1)
 
@@ -211,8 +245,12 @@ class AudioCaptureManager(QObject):
         CHUNK = 4096
         FORMAT = pyaudio.paInt16
         frames = []
-        last_chunk_time = time.time()
         max_chunk_level = 0
+        
+        # VAD variables
+        is_speaking = False
+        last_speech_time = time.time()
+        chunk_start_time = time.time()
 
         while self.is_recording and stream and stream.is_active():
             try:
@@ -224,21 +262,47 @@ class AudioCaptureManager(QObject):
                 
                 level = self._calculate_level(data)
                 self.current_sys_level = level
-                self.last_sys_level_time = time.time()
+                now = time.time()
+                self.last_sys_level_time = now
                 
+                if level >= 4:
+                    if not is_speaking:
+                        is_speaking = True
+                        if len(frames) == 0:
+                            chunk_start_time = now
+                    last_speech_time = now
+                    
                 if level > max_chunk_level:
                     max_chunk_level = level
                     
                 frames.append(data)
                 
-                now = time.time()
-                if now - last_chunk_time >= self.chunk_duration:
+                chunk_duration = now - chunk_start_time
+                silence_duration = now - last_speech_time
+                
+                if not is_speaking and chunk_duration > 3.0:
+                    frames.clear()
+                    max_chunk_level = 0
+                    chunk_start_time = now
+                    last_speech_time = now
+                    continue
+                    
+                should_emit = False
+                if is_speaking and silence_duration >= 1.0:
+                    should_emit = True
+                elif is_speaking and chunk_duration >= 15.0:
+                    should_emit = True
+
+                if should_emit:
                     if frames and max_chunk_level >= 4:
                         wav_bytes = self._frames_to_wav(frames, channels, self.p.get_sample_size(FORMAT), rate)
                         self.chunk_ready.emit(wav_bytes, "DİĞER")
                     frames.clear()
                     max_chunk_level = 0
-                    last_chunk_time = now
+                    is_speaking = False
+                    chunk_start_time = now
+                    last_speech_time = now
+                    
             except Exception as e:
                 time.sleep(0.1)
 
