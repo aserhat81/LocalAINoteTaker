@@ -184,8 +184,8 @@ class LlmAnalyzerThread(QThread):
         final_lines = []
         for line in lines:
             stripped = line.strip()
-            # Markdown kalın tag'lerini (**) görmezden gelmek için temizle
-            clean_line = stripped.replace("**", "").replace("*", "")
+            # Markdown kalın tag'lerini (**) ve heading tag'lerini (###) görmezden gelmek için temizle
+            clean_line = stripped.replace("**", "").replace("*", "").replace("#", "").strip()
             
             if clean_line.upper().startswith(heading_key):
                 extracted = clean_line.split(":", 1)[1].strip()
