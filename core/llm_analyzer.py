@@ -184,12 +184,15 @@ class LlmAnalyzerThread(QThread):
         final_lines = []
         for line in lines:
             stripped = line.strip()
-            if stripped.upper().startswith(heading_key):
-                extracted = stripped.split(":", 1)[1].strip()
+            # Markdown kalın tag'lerini (**) görmezden gelmek için temizle
+            clean_line = stripped.replace("**", "").replace("*", "")
+            
+            if clean_line.upper().startswith(heading_key):
+                extracted = clean_line.split(":", 1)[1].strip()
                 if extracted:
                     title = extracted
-            elif stripped.upper().startswith(participants_key):
-                extracted = stripped.split(":", 1)[1].strip()
+            elif clean_line.upper().startswith(participants_key):
+                extracted = clean_line.split(":", 1)[1].strip()
                 if extracted:
                     participants_str = extracted
             else:

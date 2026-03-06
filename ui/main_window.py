@@ -730,7 +730,10 @@ class HistoryDialog(QDialog):
             search_term = None
             
         for rec in self.db.get_recent_meetings(start_date=start_date, end_date=end_date, search_term=search_term):
-            self.list_widget.addItem(f"{rec[2][:16]}\n{rec[1]}")
+            title = rec[1]
+            if not title:
+                title = "Genel Toplantı Özeti" if self.lang == "tr" else "General Meeting Summary"
+            self.list_widget.addItem(f"{rec[2][:16]}\n{title}")
             self.list_widget.item(self.list_widget.count() - 1).setData(Qt.UserRole, rec[0])
 
     def on_meeting_selected(self):
