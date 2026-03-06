@@ -1158,6 +1158,12 @@ class MainWindow(QMainWindow):
     def on_analysis_error(self, err_msg):
         self.statusBar_widget.showMessage(err_msg)
         self.subtitle_box.append(f"<br><b style='color:#F38BA8;'>{self.t('analysis_failed')}</b> {err_msg}")
+        
+        # Hata olsa bile LLM'den dönmediği için kaybolmasın diye sadece transkripti kaydet
+        fallback_title = "Analiz Edilemeyen Toplantı" if self._lang == "tr" else "Unanalyzed Meeting"
+        fallback_summary = f"Analiz Hatası: {err_msg}" if self._lang == "tr" else f"Analysis Error: {err_msg}"
+        self.db.save_meeting(fallback_title, self.full_transcript_buffer, fallback_summary, participants="")
+        self.statusBar_widget.showMessage(self.t("saved_status"))
 
     # ─── ASR ─────────────────────────────────────────────────────────────────
 
