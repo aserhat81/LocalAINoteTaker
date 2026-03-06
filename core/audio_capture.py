@@ -15,7 +15,7 @@ class AudioCaptureManager(QObject):
         super().__init__()
         self.p = pyaudio.PyAudio()
         self.is_recording = False
-        self.chunk_duration = 10  # 10 saniye → Whisper için daha fazla bağlam = daha iyi doğruluk
+        self.chunk_duration = 8   # 8 saniye → daha kısa chunk, kuyruk birikimi azalır
         
         self.mic_stream = None
         self.sys_stream = None
@@ -202,6 +202,11 @@ class AudioCaptureManager(QObject):
             except Exception as e:
                 time.sleep(0.1)
 
+        # Loop bitince (stop_recording) kalan son frame'leri de gönder (kayıp olmasın)
+        if frames and max_chunk_level >= 4:
+            wav_bytes = self._frames_to_wav(frames, channels, self.p.get_sample_size(FORMAT), rate)
+            self.chunk_ready.emit(wav_bytes, "BEN")
+
     def _sys_record_loop(self, stream, rate, channels):
         CHUNK = 4096
         FORMAT = pyaudio.paInt16
@@ -236,6 +241,10 @@ class AudioCaptureManager(QObject):
                     last_chunk_time = now
             except Exception as e:
                 time.sleep(0.1)
+
+        if frames and max_chunk_level >= 4:
+            wav_bytes = self._frames_to_wav(frames, channels, self.p.get_sample_size(FORMAT), rate)
+            self.chunk_ready.emit(wav_bytes, "DİĞER")
 
     def _frames_to_wav(self, frames, channels, sample_width, rate):
         wav_io = io.BytesIO()

@@ -47,9 +47,9 @@ class AsrClientThread(QThread):
                 'file': ('chunk.wav', self.wav_bytes, 'audio/wav')
             }
             data = {
-                'model': 'whisper-v3',
+                'model': 'whisper-v3:turbo',  # FLM model adı (whisper-large-v3-turbo)
                 'response_format': 'json',
-                'language': self.language,   # Dil sabit → tahmin yükü yok, doğruluk artar
+                'language': self.language,
             }
             
             response = requests.post(self.api_url, files=files, data=data, timeout=60)

@@ -70,7 +70,7 @@ class FlmManager(QObject):
 
         try:
             # "flm serve" komutu — port 52625'te REST API açar
-            cmd = ["flm", "serve", "gemma3:4b", "--asr", "1"]
+            cmd = ["flm", "serve", "qwen3:8b", "--asr", "1"]
 
             creationflags = 0
             startupinfo = None
