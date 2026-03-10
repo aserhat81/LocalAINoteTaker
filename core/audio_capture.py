@@ -70,26 +70,43 @@ class AudioCaptureManager(QObject):
         mic_rate = None
         mic_channels = None
         if mic_info:
-            mic_rate = int(mic_info["defaultSampleRate"])
-            mic_channels = max(1, int(mic_info["maxInputChannels"]))
-            if mic_channels > 2: mic_channels = 1
             try:
-                self.mic_stream = self.p.open(format=FORMAT,
-                                              channels=mic_channels,
-                                              rate=mic_rate,
-                                              input=True,
-                                              input_device_index=mic_info["index"],
-                                              frames_per_buffer=CHUNK)
+                # Try common sample rates if default fails
+                rates_to_try = [int(mic_info["defaultSampleRate"]), 44100, 48000, 16000]
+                channels_to_try = [max(1, int(mic_info["maxInputChannels"])), 1, 2]
+                
+                opened = False
+                for r in rates_to_try:
+                    if opened: break
+                    for c in channels_to_try:
+                        try:
+                            self.mic_stream = self.p.open(format=FORMAT,
+                                                          channels=c,
+                                                          rate=r,
+                                                          input=True,
+                                                          input_device_index=mic_info["index"],
+                                                          frames_per_buffer=CHUNK)
+                            mic_rate = r
+                            mic_channels = c
+                            opened = True
+                            break
+                        except Exception:
+                            continue
+                
+                if not opened:
+                    print(f"Could not open mic stream with any common configuration for {mic_info['name']}")
+                    self.mic_stream = None
             except Exception as e:
-                print(f"Error opening mic stream: {e}")
+                print(f"Error initializing mic stream search: {e}")
                 self.mic_stream = None
 
         sys_rate = None
         sys_channels = None
         if self.mode == "online" and sys_info:
-            sys_rate = int(sys_info["defaultSampleRate"])
-            sys_channels = sys_info["maxInputChannels"]
             try:
+                # Loopback typically uses specific rates
+                sys_rate = int(sys_info["defaultSampleRate"])
+                sys_channels = sys_info["maxInputChannels"]
                 self.sys_stream = self.p.open(format=FORMAT,
                                               channels=sys_channels,
                                               rate=sys_rate,
@@ -98,7 +115,18 @@ class AudioCaptureManager(QObject):
                                               frames_per_buffer=CHUNK)
             except Exception as e:
                 print(f"Error opening sys stream: {e}")
-                self.sys_stream = None
+                # Try standard 44.1k fallback for loopback
+                try:
+                    self.sys_stream = self.p.open(format=FORMAT,
+                                                  channels=2,
+                                                  rate=44100,
+                                                  input=True,
+                                                  input_device_index=sys_info["index"],
+                                                  frames_per_buffer=CHUNK)
+                    sys_rate = 44100
+                    sys_channels = 2
+                except:
+                    self.sys_stream = None
 
         # 2) Start Threads
         self.threads = []

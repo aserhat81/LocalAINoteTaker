@@ -1,5 +1,10 @@
 import sys
+import os
 import locale
+import time
+import datetime
+import math
+import pythoncom
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                                QLabel, QPushButton, QComboBox, QTextEdit,
                                QGroupBox, QStatusBar, QMessageBox,
@@ -17,6 +22,9 @@ from core.asr_client import AsrClientThread
 from core.llm_analyzer import LlmAnalyzerThread
 from database.db_manager import DatabaseManager
 from utils.email_sender import send_email_mailto
+from core.outlook_manager import OutlookManager
+from PySide6.QtWidgets import QSystemTrayIcon, QMenu
+from PySide6.QtCore import Qt, QRegularExpression, QDate, QTimer
 
 # ─── Lokalizasyon sözlüğü ────────────────────────────────────────────────────
 I18N = {
@@ -88,6 +96,20 @@ I18N = {
         "filter_all": "Tarih: Tümü",
         "participants_label": "Katılımcılar:",
         "search_placeholder": "Toplantılarda ara (örn: genesys)...",
+        "outlook_notify_title": "Yaklaşan Toplantı (Outlook)",
+        "outlook_notify_body": "{subject} başlamak üzere.\nKayda başlamak ister misiniz?",
+        "btn_start_now": "Şimdi Başla",
+        "hide_to_tray": "Uygulama arka planda çalışmaya devam ediyor.",
+        "ics_url_label": "Takvim Linki (ICS Export):",
+        "ics_url_ph": "https://outlook.office365.com/owa/calendar/...",
+        "btn_save_ics": "💾 Kaydet ve Kontrol Et",
+        "ics_syncing": "⏳ Senkronize ediliyor...",
+        "ics_sync_ok": "✓ Takvim güncellendi. {count} toplantı bulundu.",
+        "ics_sync_err": "❌ Takvim okunamadı! Linki kontrol edin.",
+        "ics_next_meeting": "Sıradaki: {subject} ({time})",
+        "ics_list_header": "📅 Bugünkü Toplantılar:",
+        "btn_refresh_mics": "🔄 Yenile",
+        "btn_toggle_meetings": "📅 Toplantı Listesi",
     },
     "en": {
         "window_title": "Local AI Note Taker by Serhat",
@@ -157,6 +179,20 @@ I18N = {
         "filter_all": "Date: All",
         "participants_label": "Participants:",
         "search_placeholder": "Search in meetings...",
+        "outlook_notify_title": "Upcoming Meeting (Outlook)",
+        "outlook_notify_body": "{subject} is about to start.\nWould you like to start recording?",
+        "btn_start_now": "Start Now",
+        "hide_to_tray": "Application is running in the background.",
+        "ics_url_label": "Calendar Link (ICS Export):",
+        "ics_url_ph": "https://outlook.office365.com/owa/calendar/...",
+        "btn_save_ics": "💾 Save and Check",
+        "ics_syncing": "⏳ Syncing...",
+        "ics_sync_ok": "✓ Calendar updated. {count} meetings found.",
+        "ics_sync_err": "❌ Could not read calendar! Check link.",
+        "ics_next_meeting": "Next: {subject} ({time})",
+        "ics_list_header": "📅 Today's Meetings:",
+        "btn_refresh_mics": "🔄 Refresh",
+        "btn_toggle_meetings": "📅 Meeting List",
     }
 }
 
@@ -867,19 +903,220 @@ class MainWindow(QMainWindow):
         self.audio_manager = AudioCaptureManager()
         self.audio_manager.chunk_ready.connect(self.on_audio_chunk_ready)
         self.db = DatabaseManager()
+        
+        # Load ICS URL from DB
+        ics_url = self.db.get_setting("ics_url", "")
+        self.outlook_manager = OutlookManager(ics_url=ics_url)
 
         self.asr_threads = []   # Güçlü referans listesi
         self.asr_queue = []     # İşlem sırası kuyruğu
         self.meeting_active = False  # True iken ses paketleri işlenir
         self.llm_thread = None
         self.full_transcript_buffer = ""
+        self.notified_meetings = set() # Zaten bildirim yapılan toplantılar
 
         # Dili OS'dan algıla, sonra combo ile değiştirilebilir
         self._lang = detect_os_lang()
 
         self.setup_ui()
+        self.setup_tray()
         self.apply_language()   # İlk dil uygulaması
         self.populate_mics()
+
+        # Outlook sync timer (5 dakikada bir)
+        self.sync_timer = QTimer(self)
+        self.sync_timer.timeout.connect(self.sync_calendar_silent)
+        self.sync_timer.start(5 * 60 * 1000)
+        
+        # Bildirim kontrol timer (1 dakikada bir - tam vaktinde yakalamak için)
+        self.notif_timer = QTimer(self)
+        self.notif_timer.timeout.connect(self.check_outlook_meetings)
+        self.notif_timer.start(60 * 1000)
+
+        # Hemen ilk kontrolü yap
+        QTimer.singleShot(5000, self.sync_calendar_silent)
+        QTimer.singleShot(7000, self.check_outlook_meetings)
+
+    def on_ics_url_changed(self, text):
+        """ICS URL değiştiğinde sadece manager'ı güncelle, kaydetme butona basılınca olacak."""
+        self.outlook_manager.ics_url = text
+
+    def sync_calendar_silent(self):
+        """Arka planda sessizce senkronizasyon yapar (UI'ı bozmadan)."""
+        url = self.ics_input.text().strip()
+        if not url: return
+        self.outlook_manager.ics_url = url
+        try:
+            meetings = self.outlook_manager.get_upcoming_meetings()
+            if meetings:
+                # Durum yazısını güncelle ama odağı bozma
+                t = I18N[self._lang]
+                now = datetime.datetime.now()
+                today = datetime.date.today()
+                today_meetings = [m for m in meetings if m['start'].date() == today]
+                upcoming = sorted([m for m in today_meetings if m['start'] >= now], key=lambda x: x['start'])
+                if upcoming:
+                    m = upcoming[0]
+                    next_str = t["ics_next_meeting"].format(subject=m['subject'], time=m['start'].strftime("%H:%M"))
+                    self.ics_status_label.setText(t["ics_sync_ok"].format(count=len(meetings)) + " | " + next_str)
+        except: pass
+
+    def sync_calendar(self):
+        """Takvimi manuel senkronize eder ve UI'da geri bildirim verir."""
+        t = I18N[self._lang]
+        url = self.ics_input.text().strip()
+        
+        # Immediate feedback
+        self.ics_status_label.setText(t["ics_syncing"])
+        self.ics_status_label.setStyleSheet("color: #F9E2AF; font-size: 11px;")
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
+
+        self.db.save_setting("ics_url", url)
+        self.outlook_manager.ics_url = url
+        
+        try:
+            meetings = self.outlook_manager.get_upcoming_meetings()
+            
+            if url == "" and not meetings:
+                self.ics_status_label.setText("")
+                return
+
+            self.ics_status_label.setText(t["ics_sync_ok"].format(count=len(meetings)))
+            self.ics_status_label.setStyleSheet("color: #A6E3A1; font-size: 11px;")
+            
+            # En yakındaki GELECEK toplantıyı göster
+            now = datetime.datetime.now()
+            today = datetime.date.today()
+            today_meetings = [m for m in meetings if m['start'].date() == today]
+            upcoming = sorted([m for m in today_meetings if m['start'] >= now], key=lambda x: x['start'])
+            if upcoming:
+                m = upcoming[0]
+                next_str = t["ics_next_meeting"].format(subject=m['subject'], time=m['start'].strftime("%H:%M"))
+                self.ics_status_label.setText(self.ics_status_label.text() + " | " + next_str)
+                
+            # Listeyi UI kutusuna bas (toggle edilince görünsün)
+            self.ics_list_box.clear()
+            self.ics_list_box.append(f"<b>{t['ics_list_header']}</b>")
+            for m in sorted(today_meetings, key=lambda x: x['start']):
+                self.ics_list_box.append(f"• {m['start'].strftime('%H:%M')} - {m['subject']}")
+                
+        except Exception as e:
+            self.ics_status_label.setText(t["ics_sync_err"])
+            self.ics_status_label.setStyleSheet("color: #F38BA8; font-size: 11px;")
+            self.statusBar_widget.showMessage(f"Sync Error: {str(e)}")
+
+    def toggle_meeting_list(self):
+        if self.ics_list_box.isVisible():
+            self.ics_list_box.hide()
+        else:
+            self.ics_list_box.show()
+
+    def setup_tray(self):
+        self.tray_icon = QSystemTrayIcon(self)
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icon.png")
+        if os.path.exists(icon_path):
+            self.tray_icon.setIcon(QIcon(icon_path))
+        else:
+            self.tray_icon.setIcon(self.style().standardIcon(self.style().SP_ComputerIcon))
+        
+        tray_menu = QMenu()
+        show_action = QAction("Göster / Show", self)
+        show_action.triggered.connect(self.showNormal)
+        exit_action = QAction("Çıkış / Exit", self)
+        exit_action.triggered.connect(self.force_quit)
+        
+        tray_menu.addAction(show_action)
+        tray_menu.addSeparator()
+        tray_menu.addAction(exit_action)
+        
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self.on_tray_icon_activated)
+        self.tray_icon.show()
+
+    def on_tray_icon_activated(self, reason):
+        if reason == QSystemTrayIcon.Trigger:
+            if self.isVisible():
+                self.hide()
+            else:
+                self.showNormal()
+                self.activateWindow()
+
+    def force_quit(self):
+        """Uygulamayı tamamen kapatır."""
+        self._is_force_quitting = True
+        # Tüm servisleri ve kayıtları durdur
+        try:
+            self.audio_manager.stop_recording()
+            self.flm_manager.stop_service()
+        except: pass
+        self.close()
+        # Eğer hala kapanmadıysa (nadiren olur), zorla çık
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.instance().quit()
+
+    def check_outlook_meetings(self):
+        """Outlook takvimini kontrol eder ve tam saatinde bildirim basar."""
+        if self.audio_manager.is_recording:
+            return
+            
+        today = datetime.date.today()
+        start_date = today.strftime("%Y-%m-%d 00:00")
+        end_date = today.strftime("%Y-%m-%d 23:59")
+        filter_str = "[Start] >= '" + start_date + "' AND [Start] <= '" + end_date + "'"
+        meetings = self.outlook_manager.get_upcoming_meetings(filter_str=filter_str)
+        now = datetime.datetime.now()
+        
+        for m in meetings:
+            # Toplantı saati gelmiş mi? 
+            # Pencereyi genişletiyoruz: Başlangıçtan 30sn önce başlar, 5 dk sonrasına kadar (300sn) bildirim verir.
+            # Böylece bilgisayar o an meşgulse bile bildirimi kaçırmaz.
+            time_diff = (m['start'] - now).total_seconds()
+            if -30 <= time_diff <= 300: 
+                m_id = f"{m['subject']}_{m['start']}"
+                if m_id not in self.notified_meetings:
+                    self.notified_meetings.add(m_id)
+                    self.show_meeting_notification(m)
+
+    def show_meeting_notification(self, meeting):
+        t = I18N[self._lang]
+        title = t["outlook_notify_title"]
+        body = t["outlook_notify_body"].format(subject=meeting['subject'])
+        
+        # Tray bildirimini ek bilgi olarak hala gönderelim
+        self.tray_icon.showMessage(title, body, QSystemTrayIcon.Information, 10000)
+
+        # ASIL BİLDİRİM: Ekranın ortasında ve en üstte (Topmost) Popup
+        msg = QMessageBox(self)
+        msg.setWindowTitle(title)
+        msg.setText(body)
+        msg.setIcon(QMessageBox.Information)
+        msg.setStandardButtons(QMessageBox.Ok)
+        
+        # Her zaman en üstte olması için daha agresif flagler
+        from PySide6.QtCore import Qt
+        msg.setWindowFlags(msg.windowFlags() | Qt.WindowStaysOnTopHint | Qt.WindowSystemMenuHint)
+        
+        # SES ÇIKART (Windows Standard Alert)
+        try:
+            import winsound
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+        except: pass
+
+        # Uygulama minimize edilmişse bile popup görünmesi için zorla
+        if self.isMinimized() or not self.isVisible():
+            self.showNormal()
+            self.activateWindow()
+            self.raise_()
+
+        msg.exec()
+
+    def on_notification_clicked(self):
+        self.showNormal()
+        self.activateWindow()
+        try:
+            self.tray_icon.messageClicked.disconnect(self.on_notification_clicked)
+        except Exception: pass
 
     # ─── Dil ─────────────────────────────────────────────────────────────────
 
@@ -905,6 +1142,14 @@ class MainWindow(QMainWindow):
         self.mode_label.setText(t["mode_label"])
         self.subtitle_box.setPlaceholderText(t["subtitle_placeholder"])
         self.statusBar_widget.showMessage(t["status_ready"])
+        self.subtitle_box.setPlaceholderText(t["subtitle_placeholder"])
+        self.statusBar_widget.showMessage(t["status_ready"])
+        self.ics_label.setText(t["ics_url_label"])
+        self.ics_input.setPlaceholderText(t["ics_url_ph"])
+        self.btn_save_ics.setText(t["btn_save_ics"])
+        self.btn_toggle_meetings.setText(t["btn_toggle_meetings"])
+        if hasattr(self, 'btn_refresh_mics'):
+            self.btn_refresh_mics.setText(t["btn_refresh_mics"])
 
         # Mod combo
         curr_mode = self.mode_combo.currentIndex()
@@ -948,6 +1193,11 @@ class MainWindow(QMainWindow):
         self.btn_history = QPushButton()
         self.btn_history.clicked.connect(self.open_history)
 
+        self.btn_toggle_meetings = QPushButton()
+        self.btn_toggle_meetings.clicked.connect(self.toggle_meeting_list)
+        # Daha belirgin bir stil
+        self.btn_toggle_meetings.setStyleSheet("background-color: #A6E3A1; color: #11111B; padding: 6px 12px; font-weight: bold; border-radius: 4px;")
+
         self.btn_about = QPushButton()
         self.btn_about.clicked.connect(self.show_about)
 
@@ -959,6 +1209,7 @@ class MainWindow(QMainWindow):
         self.lang_label_widget = QLabel()
         top.addWidget(app_title)
         top.addStretch()
+        top.addWidget(self.btn_toggle_meetings)
         top.addWidget(self.btn_history)
         top.addWidget(self.btn_about)
         top.addSpacing(15)
@@ -977,6 +1228,39 @@ class MainWindow(QMainWindow):
         service_layout.addWidget(self.status_indicator)
         service_layout.addWidget(self.btn_start_flm)
         service_layout.addStretch()
+
+        # ICS URL Section
+        ics_layout = QVBoxLayout()
+        ics_top = QHBoxLayout()
+        self.ics_label = QLabel()
+        self.ics_input = QLineEdit()
+        self.ics_input.setText(self.db.get_setting("ics_url", ""))
+        self.ics_input.textChanged.connect(self.on_ics_url_changed)
+        self.ics_input.setStyleSheet("background-color: #313244; color: #CDD6F4; border: 1px solid #45475A; padding: 4px;")
+        
+        self.btn_save_ics = QPushButton()
+        self.btn_save_ics.clicked.connect(self.sync_calendar)
+        self.btn_save_ics.setStyleSheet("background-color: #89B4FA; color: #11111B; padding: 4px 10px; font-weight: bold;")
+        
+        ics_top.addWidget(self.ics_label)
+        ics_top.addWidget(self.ics_input)
+        ics_top.addWidget(self.btn_save_ics)
+        
+        self.ics_status_label = QLabel("")
+        self.ics_status_label.setStyleSheet("color: #A6ADC8; font-size: 11px;")
+        
+        self.ics_list_box = QTextEdit()
+        self.ics_list_box.setReadOnly(True)
+        self.ics_list_box.setMaximumHeight(100)
+        self.ics_list_box.setStyleSheet("background-color: #181825; color: #CDD6F4; border: 1px solid #313244; font-size: 11px; margin-top: 5px; padding: 5px;")
+        self.ics_list_box.hide() 
+
+        ics_layout.addLayout(ics_top)
+        ics_layout.addWidget(self.ics_status_label)
+        ics_layout.addWidget(self.ics_list_box)
+        
+        service_layout.addLayout(ics_layout)
+
         main_layout.addWidget(self.service_group)
 
         # Recording group
@@ -987,7 +1271,12 @@ class MainWindow(QMainWindow):
         controls = QHBoxLayout()
         self.mic_label = QLabel()
         self.mic_combo = QComboBox()
-        self.mic_combo.setMinimumWidth(200)
+        self.mic_combo.setMinimumWidth(250)
+        
+        self.btn_refresh_mics = QPushButton()
+        self.btn_refresh_mics.clicked.connect(self.populate_mics)
+        self.btn_refresh_mics.setStyleSheet("background-color: #313244; color: #CDD6F4; padding: 4px 10px; font-size: 11px;")
+        
         self.mode_label = QLabel()
         self.mode_combo = QComboBox()
 
@@ -1002,7 +1291,8 @@ class MainWindow(QMainWindow):
 
         controls.addWidget(self.mic_label)
         controls.addWidget(self.mic_combo)
-        controls.addSpacing(10)
+        controls.addWidget(self.btn_refresh_mics)
+        controls.addSpacing(20)
         controls.addWidget(self.mode_label)
         controls.addWidget(self.mode_combo)
         controls.addWidget(self.btn_start_record)
@@ -1033,10 +1323,17 @@ class MainWindow(QMainWindow):
 
     def populate_mics(self):
         mics = self.audio_manager.get_input_devices()
+        self.mic_combo.blockSignals(True)
         self.mic_combo.clear()
         self.mic_combo.addItem(self.t("default_mic"), None)
+        
+        seen_names = set()
         for mic in mics:
-            self.mic_combo.addItem(mic["name"], mic["index"])
+            name = mic["name"].strip()
+            if name and name not in seen_names:
+                self.mic_combo.addItem(name, mic["index"])
+                seen_names.add(name)
+        self.mic_combo.blockSignals(False)
 
     # ─── FLM ─────────────────────────────────────────────────────────────────
 
@@ -1213,6 +1510,18 @@ class MainWindow(QMainWindow):
         self.statusBar_widget.showMessage(message)
 
     def closeEvent(self, event):
+        if not getattr(self, '_is_force_quitting', False):
+            if self.isVisible():
+                self.hide()
+                self.tray_icon.showMessage(
+                    self.t("window_title"),
+                    self.t("hide_to_tray"),
+                    QSystemTrayIcon.Information,
+                    2000
+                )
+                event.ignore()
+                return
+
         self.audio_manager.stop_recording()
         self.flm_manager.stop_service()
         # Queue'yu temizle
@@ -1226,6 +1535,15 @@ class MainWindow(QMainWindow):
                 self.llm_thread.wait(500)
             except Exception: pass
         event.accept()
+
+    def changeEvent(self, event):
+        """Pencere küçültüldüğünde (minimize) görev çubuğundan gizle ve tepsiye at."""
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.WindowStateChange:
+            if self.isMinimized():
+                # Küçültme butonuna basıldığında gizle (taskbarda görünmesin)
+                QTimer.singleShot(0, self.hide)
+        super().changeEvent(event)
 
     def show_about(self):
         t = I18N[self._lang]

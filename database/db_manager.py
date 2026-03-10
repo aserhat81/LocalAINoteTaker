@@ -23,11 +23,13 @@ class DatabaseManager:
                     participants TEXT
                 )
             ''')
-            # Eskiden kalma veritabanlarını güncellemek için
-            try:
-                cursor.execute('ALTER TABLE meetings ADD COLUMN participants TEXT')
-            except sqlite3.OperationalError:
-                pass  # Sütun zaten varsa hata verir, yoksay
+            # Ayarlar tablosu
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            ''')
             conn.commit()
 
     def save_meeting(self, title, transcript, summary, participants=""):
@@ -86,3 +88,16 @@ class DatabaseManager:
             if participants is not None:
                 cursor.execute('UPDATE meetings SET participants = ? WHERE id = ?', (participants, meeting_id))
             conn.commit()
+
+    def save_setting(self, key, value):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, value))
+            conn.commit()
+
+    def get_setting(self, key, default=None):
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
+            row = cursor.fetchone()
+            return row[0] if row else default

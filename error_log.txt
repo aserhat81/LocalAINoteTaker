@@ -1,0 +1,28 @@
+
+==================================================
+Traceback (most recent call last):
+  File "D:\Local AI Note Taker\main.py", line 40, in launch_main_app
+    app.main_window = MainWindow()
+                      ^^^^^^^^^^^^
+  File "D:\Local AI Note Taker\ui\main_window.py", line 896, in __init__
+    self.setup_tray()
+  File "D:\Local AI Note Taker\ui\main_window.py", line 909, in setup_tray
+    icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icon.png")
+                ^^
+NameError: name 'os' is not defined
+
+==================================================
+
+==================================================
+Traceback (most recent call last):
+  File "D:\Local AI Note Taker\main.py", line 40, in launch_main_app
+    app.main_window = MainWindow()
+                      ^^^^^^^^^^^^
+  File "D:\Local AI Note Taker\ui\main_window.py", line 921, in __init__
+    self.setup_ui()
+  File "D:\Local AI Note Taker\ui\main_window.py", line 1266, in setup_ui
+    self.mic_combo.currentIndexChanged.connect(self.on_mic_changed)
+                                               ^^^^^^^^^^^^^^^^^^^
+AttributeError: 'MainWindow' object has no attribute 'on_mic_changed'
+
+==================================================
