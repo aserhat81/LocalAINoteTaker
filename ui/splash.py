@@ -76,9 +76,13 @@ class SplashScreen(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setWindowFlags(Qt.SplashScreen | Qt.FramelessWindowHint)
+        # Splash screen ve çerçevesiz pencere ayarları
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(500, 300)
+        self.setFixedSize(500, 320)
+        
+        # Windows'ta bazen saydamlık için arka planı tamamen temizlemek gerekir
+        self.setStyleSheet("background:transparent;")
         
         self.setup_ui()
         self.start_bootstrapper()
