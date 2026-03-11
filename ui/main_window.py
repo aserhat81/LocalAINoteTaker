@@ -112,6 +112,8 @@ I18N = {
         "ics_list_header": "📅 Bugünkü Toplantılar:",
         "btn_refresh_mics": "🔄 Yenile",
         "btn_toggle_meetings": "📅 Toplantı Listesi",
+        "analysis_done_title": "Analiz Tamamlandı",
+        "analysis_done_body": "Toplantı özeti hazır ve kaydedildi.",
     },
     "en": {
         "window_title": "Local AI Note Taker by Serhat",
@@ -197,6 +199,8 @@ I18N = {
         "ics_list_header": "📅 Today's Meetings:",
         "btn_refresh_mics": "🔄 Refresh",
         "btn_toggle_meetings": "📅 Meeting List",
+        "analysis_done_title": "Analysis Completed",
+        "analysis_done_body": "The meeting summary is ready and saved.",
     }
 }
 
@@ -1469,6 +1473,18 @@ class MainWindow(QMainWindow):
         disp_html = f"<br><b><span style='color: #A6E3A1; font-size:16px;'>{title}</span></b><br><span style='color: #F5C2E7; font-size:13px;'>Katılımcılar: {participants}</span><br><span style='color: #CDD6F4;'>{summary}</span>"
         self.subtitle_box.append(disp_html.replace('\n', '<br>'))
         self.statusBar_widget.showMessage(self.t("saved_status"))
+        
+        # BİLDİRİM: Analiz bittiğinde tepsi mesajı ve ses çıkart
+        try:
+            self.tray_icon.showMessage(
+                self.t("analysis_done_title"),
+                self.t("analysis_done_body"),
+                QSystemTrayIcon.Information,
+                3000
+            )
+            import winsound
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+        except Exception: pass
 
     def on_analysis_error(self, err_msg):
         self.statusBar_widget.showMessage(err_msg)
