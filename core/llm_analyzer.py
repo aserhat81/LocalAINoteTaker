@@ -167,6 +167,7 @@ class LlmAnalyzerThread(QThread):
                 {"role": "user",   "content": user_prompt}
             ],
             "temperature": 0.2,
+            "repeat_penalty": 1.15,
             "max_tokens": max_tokens,
             "chat_template_kwargs": {"enable_thinking": False}
         }
