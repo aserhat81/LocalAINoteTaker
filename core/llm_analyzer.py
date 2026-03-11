@@ -13,7 +13,8 @@ class LlmAnalyzerThread(QThread):
             "system": (
                 "Sen profesyonel bir toplantı analiz uzmanı ve yönetici asistanısın. "
                 "Görevin transkriptteki TÜM konuları eksiksiz yakalamaktır. "
-                "Hiçbir konuyu, ne kadar kısa süre konuşulmuş olursa olsun atlama. "
+                "Whisper kaynaklı transkript hatalarını, fonetik yanlışları ve yarım kalmış cümleleri "
+                "toplantı bağlamını kullanarak düzelterek analiz yap. "
                 "Tüm yanıtlarını TÜRKÇE ver."
             ),
             "heading": "BAŞLIK",
@@ -38,7 +39,8 @@ class LlmAnalyzerThread(QThread):
                 "5) ## Eylem Maddeleri\n"
                 "   Toplantıdan çıkan yapılacaklar listesini yaz. Hiç yapılacak maddesi yoksa "
                 "'Bu toplantıda belirlenmiş eylem maddesi yoktur.' yaz.\n\n"
-                "UYARI: Transkripte hiç bakmadan özet sıkıştırma! "
+                "ÖNEMLİ: Transkriptte Whisper kaynaklı duyum hataları veya bozuk cümleler olabilir. "
+                "Bunları bağlamdan yola çıkarak mantıklı hale getir ve özeti en doğru anlam üzerinden kurgula. "
                 "Transkriptteki her konuyu mutlaka Madde 3 ve Madde 4'e yansıt."
             ),
             "intermediate": (
@@ -54,7 +56,8 @@ class LlmAnalyzerThread(QThread):
             "system": (
                 "You are a professional meeting analyst and executive assistant. "
                 "Your job is to capture ALL topics from the transcript without exception. "
-                "Never skip any topic, no matter how briefly it was discussed. "
+                "Correct any Whisper-induced transcription errors, phonetic mistakes, and incomplete sentences "
+                "by using the meeting context before analyzing. "
                 "Always respond in ENGLISH."
             ),
             "heading": "TITLE",
@@ -78,7 +81,8 @@ class LlmAnalyzerThread(QThread):
                 "5) ## Action Items\n"
                 "   List all to-do items from the meeting. If none exist, write "
                 "'No action items were identified in this meeting.'\n\n"
-                "WARNING: Do not compress the summary by ignoring topics. "
+                "IMPORTANT: The transcript may contain Whisper-induced errors or garbled sentences. "
+                "Heuristicly correct these based on context to ensure the summary reflects the intended meaning. "
                 "Every topic in the transcript MUST appear in sections 3 and 4."
             ),
             "intermediate": (
