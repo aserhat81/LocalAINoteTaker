@@ -1,5 +1,5 @@
 # Local AI Note Taker
-### Powered by AMD NPU · FastFlowLM · Whisper · Gemma3
+### Powered by AMD NPU · FastFlowLM · Whisper · Qwen3:9B
 
 🌍 **[Türkçe versiyon için aşağı kaydırın](#-türkçe)**
 
