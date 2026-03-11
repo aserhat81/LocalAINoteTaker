@@ -3,7 +3,7 @@ import win32com.client
 import pythoncom
 import requests
 from icalendar import Calendar
-from dateutil import tz
+from dateutil import tz, rrule
 
 class OutlookManager:
     def __init__(self, ics_url=None):
@@ -28,16 +28,17 @@ class OutlookManager:
             for component in cal.walk():
                 if component.name == "VEVENT":
                     summary = str(component.get('summary'))
-                    start = component.get('dtstart').dt
+                    start_val = component.get('dtstart').dt
                     
                     # Eğer datetime değilse (tüm gün etkinliği) datetime'a çevir
-                    if isinstance(start, datetime.date) and not isinstance(start, datetime.datetime):
-                        start = datetime.datetime.combine(start, datetime.time.min).replace(tzinfo=tz.tzlocal())
-                    elif start.tzinfo is None:
-                        start = start.replace(tzinfo=tz.tzlocal())
+                    if isinstance(start_val, datetime.date) and not isinstance(start_val, datetime.datetime):
+                        start_dt = datetime.datetime.combine(start_val, datetime.time.min).replace(tzinfo=tz.tzlocal())
+                    elif start_val.tzinfo is None:
+                        start_dt = start_val.replace(tzinfo=tz.tzlocal())
                     else:
-                        start = start.astimezone(tz.tzlocal())
+                        start_dt = start_val.astimezone(tz.tzlocal())
 
+                    # Süre hesapla
                     duration_obj = component.get('duration')
                     duration = 0
                     if duration_obj:
@@ -52,18 +53,45 @@ class OutlookManager:
                                 end_dt = end_dt.replace(tzinfo=tz.tzlocal())
                             else:
                                 end_dt = end_dt.astimezone(tz.tzlocal())
-                            duration = int((end_dt - start).total_seconds() / 60)
+                            duration = int((end_dt - start_dt).total_seconds() / 60)
 
                     location = str(component.get('location', ''))
 
-                    # Sadece bugünküleri al
-                    if start.date() == today:
-                        meetings.append({
-                            "subject": summary,
-                            "start": start.replace(tzinfo=None),
-                            "duration": duration,
-                            "location": location
-                        })
+                    # TEKRARLAMA (RRULE) KONTROLÜ
+                    rrule_prop = component.get('rrule')
+                    if rrule_prop:
+                        try:
+                            # icalendar'ın rrule'unu dateutil'in anlayacağı stringe çevir
+                            rrule_str = rrule_prop.to_ical().decode()
+                            # rrulestr, dtstart parametresi ile birlikte kullanıldığında başlangıç tarihini baz alarak hesaplar
+                            # Ancak dtstart'ın timezone bilgisi dateutil'de bazen karmaşa yaratır, 
+                            # Bu yüzden başlangıç tarihini rrule'un başlangıcı olarak set ediyoruz.
+                            rule = rrule.rrulestr(rrule_str, dtstart=start_dt)
+                            
+                            # Bugün için olası tarihler (Gün başlangıcı ve sonu arasında)
+                            day_start = datetime.datetime.combine(today, datetime.time.min).replace(tzinfo=tz.tzlocal())
+                            day_end = datetime.datetime.combine(today, datetime.time.max).replace(tzinfo=tz.tzlocal())
+                            
+                            # Bugün gerçekleşen tüm instance'ları bul
+                            occurrences = rule.between(day_start, day_end, inc=True)
+                            for occ in occurrences:
+                                meetings.append({
+                                    "subject": summary,
+                                    "start": occ.replace(tzinfo=None),
+                                    "duration": duration,
+                                    "location": location
+                                })
+                        except Exception as re:
+                            print(f"Rrule işleme hatası: {re}")
+                    else:
+                        # Tek seferlik toplantı
+                        if start_dt.date() == today:
+                            meetings.append({
+                                "subject": summary,
+                                "start": start_dt.replace(tzinfo=None),
+                                "duration": duration,
+                                "location": location
+                            })
         except Exception as e:
             print(f"ICS verisi alınırken hata: {e}")
         return meetings
