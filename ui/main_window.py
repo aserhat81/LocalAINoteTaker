@@ -39,6 +39,7 @@ I18N = {
         "btn_flm_external": "Harici Servis Aktif",
         "record_group": "Toplantı Kayıt ve Altyazı",
         "mic_label": "Mikrofon:",
+        "speaker_label": "Hoparlör:",
         "mode_label": "Mod:",
         "mode_online": "Online Toplantı (Sistem + Mikrofon)",
         "mode_mic": "Sadece Mikrofon (Dikte)",
@@ -59,6 +60,7 @@ I18N = {
         "history_detail_label": "Detay Seçin",
         "btn_send_email": "📧 E-Posta ile Gönder",
         "default_mic": "Varsayılan Sistem Mikrofonu",
+        "default_speaker": "Varsayılan Hoparlör (Sistem Sesi)",
         "analysis_failed": "Analiz Başarısız:",
         "btn_about": "❓ Hakkında",
         "about_title": "Hakkında",
@@ -122,6 +124,7 @@ I18N = {
         "btn_flm_external": "External Service Active",
         "record_group": "Meeting Recording & Subtitles",
         "mic_label": "Microphone:",
+        "speaker_label": "Speaker:",
         "mode_label": "Mode:",
         "mode_online": "Online Meeting (System + Mic)",
         "mode_mic": "Microphone Only (Dictation)",
@@ -142,6 +145,7 @@ I18N = {
         "history_detail_label": "Select a Meeting",
         "btn_send_email": "📧 Send by Email",
         "default_mic": "Default System Microphone",
+        "default_speaker": "Default Speaker (System Sound)",
         "analysis_failed": "Analysis Failed:",
         "btn_about": "❓ About",
         "about_title": "About",
@@ -1069,10 +1073,10 @@ class MainWindow(QMainWindow):
         
         for m in meetings:
             # Toplantı saati gelmiş mi? 
-            # Pencereyi genişletiyoruz: Başlangıçtan 30sn önce başlar, 5 dk sonrasına kadar (300sn) bildirim verir.
-            # Böylece bilgisayar o an meşgulse bile bildirimi kaçırmaz.
+            # Pencereyi daraltıyoruz: Başlangıçtan sadece 10sn önce başlar.
+            # -300 saniye (5 dk) sonrasına kadar bildirim vermeye devam eder (yakalama modu).
             time_diff = (m['start'] - now).total_seconds()
-            if -30 <= time_diff <= 300: 
+            if -300 <= time_diff <= 10: 
                 m_id = f"{m['subject']}_{m['start']}"
                 if m_id not in self.notified_meetings:
                     self.notified_meetings.add(m_id)
@@ -1139,6 +1143,7 @@ class MainWindow(QMainWindow):
         self.service_group.setTitle(t["service_group"])
         self.record_group.setTitle(t["record_group"])
         self.mic_label.setText(t["mic_label"])
+        self.speaker_label.setText(t["speaker_label"])
         self.mode_label.setText(t["mode_label"])
         self.subtitle_box.setPlaceholderText(t["subtitle_placeholder"])
         self.statusBar_widget.showMessage(t["status_ready"])
@@ -1273,6 +1278,10 @@ class MainWindow(QMainWindow):
         self.mic_combo = QComboBox()
         self.mic_combo.setMinimumWidth(250)
         
+        self.speaker_label = QLabel()
+        self.speaker_combo = QComboBox()
+        self.speaker_combo.setMinimumWidth(250)
+        
         self.btn_refresh_mics = QPushButton()
         self.btn_refresh_mics.clicked.connect(self.populate_mics)
         self.btn_refresh_mics.setStyleSheet("background-color: #313244; color: #CDD6F4; padding: 4px 10px; font-size: 11px;")
@@ -1291,6 +1300,9 @@ class MainWindow(QMainWindow):
 
         controls.addWidget(self.mic_label)
         controls.addWidget(self.mic_combo)
+        controls.addSpacing(10)
+        controls.addWidget(self.speaker_label)
+        controls.addWidget(self.speaker_combo)
         controls.addWidget(self.btn_refresh_mics)
         controls.addSpacing(20)
         controls.addWidget(self.mode_label)
@@ -1322,6 +1334,7 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.statusBar_widget)
 
     def populate_mics(self):
+        # Mikrofon listesi
         mics = self.audio_manager.get_input_devices()
         self.mic_combo.blockSignals(True)
         self.mic_combo.clear()
@@ -1334,6 +1347,20 @@ class MainWindow(QMainWindow):
                 self.mic_combo.addItem(name, mic["index"])
                 seen_names.add(name)
         self.mic_combo.blockSignals(False)
+
+        # Hoparlör (Loopback) listesi
+        speakers = self.audio_manager.get_loopback_devices()
+        self.speaker_combo.blockSignals(True)
+        self.speaker_combo.clear()
+        self.speaker_combo.addItem(self.t("default_speaker"), None)
+        
+        seen_speakers = set()
+        for spk in speakers:
+            name = spk["name"].strip()
+            if name and name not in seen_speakers:
+                self.speaker_combo.addItem(name, spk["index"])
+                seen_speakers.add(name)
+        self.speaker_combo.blockSignals(False)
 
     # ─── FLM ─────────────────────────────────────────────────────────────────
 
@@ -1383,7 +1410,7 @@ class MainWindow(QMainWindow):
                 self.subtitle_box.append("<br><i>[Kayıt Devam Ediyor]</i><br>")
                 
             self.meeting_active = True
-            self.audio_manager.start_recording(mode, self.mic_combo.currentData())
+            self.audio_manager.start_recording(mode, self.mic_combo.currentData(), self.speaker_combo.currentData())
             self.btn_start_record.setText(self.t("btn_pause_rec"))
             self.btn_start_record.setStyleSheet("background-color: #F9E2AF; color: #11111B;")
             self.mode_combo.setEnabled(False)

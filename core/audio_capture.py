@@ -39,22 +39,41 @@ class AudioCaptureManager(QObject):
         except OSError:
             return None
 
+    def get_loopback_devices(self):
+        """Tüm WASAPI loopback (hoparlör kayıt) cihazlarını listeler."""
+        devices = []
+        try:
+            for i in range(self.p.get_device_count()):
+                dev = self.p.get_device_info_by_index(i)
+                if dev.get("isLoopbackDevice", False):
+                    devices.append({"index": i, "name": dev["name"]})
+        except Exception as e:
+            print(f"Error getting loopback devices: {e}")
+        return devices
+
     def get_default_mic_device(self):
         try:
             return self.p.get_default_input_device_info()
         except OSError:
             return None
 
-    def start_recording(self, mode="online", mic_index=None):
+    def start_recording(self, mode="online", mic_index=None, sys_index=None):
         if self.is_recording:
             return
 
         self.is_recording = True
         self.mode = mode
         
-        sys_info = self.get_default_loopback_device()
+        sys_info = None
+        if sys_index is not None:
+            try:
+                sys_info = self.p.get_device_info_by_index(sys_index)
+            except Exception:
+                sys_info = self.get_default_loopback_device()
+        else:
+            sys_info = self.get_default_loopback_device()
+
         mic_info = None
-        
         if mic_index is not None:
             try:
                 mic_info = self.p.get_device_info_by_index(mic_index)
