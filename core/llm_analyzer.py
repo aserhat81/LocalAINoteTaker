@@ -1,4 +1,5 @@
 import requests
+import re
 from PySide6.QtCore import QThread, Signal
 
 
@@ -22,7 +23,9 @@ class LlmAnalyzerThread(QThread):
             "instructions": (
                 "Aşağıdaki toplantı transkriptini dikkatle oku. Whisper kaynaklı bozuk veya eksik cümleleri "
                 "bağlamı kullanarak düzelt, sonra aşağıdaki yapıya göre TÜRKÇE analiz yap.\n\n"
-                "BAŞLIK: [Kısa ve açıklayıcı başlık]\n"
+                "YANITINİN İLK İKİ SATIRI AŞAĞIDAKI FORMAT ŞEKLİNDE OLMALIDIR "
+                "(Markdown bölümlerinden ÖNCE yaz):\n"
+                "BAŞLIK: [Toplantı bağlamından çıkarılan kısa ve açıklayıcı konu başlığı]\n"
                 "KATILIMCILAR: İsim1, İsim2  "
                 "(Sadece gerçek insan isimleri. Ürün, şirket, teknoloji ismi KESİNLİKLE dahil etme. "
                 "Emin değilsen boş bırak.)\n\n"
@@ -63,7 +66,8 @@ class LlmAnalyzerThread(QThread):
             "instructions": (
                 "Read the following meeting transcript carefully. Correct any Whisper-induced phonetic errors or "
                 "incomplete sentences using context, then produce an ENGLISH analysis with the structure below.\n\n"
-                "TITLE: [Short descriptive title]\n"
+                "IMPORTANT: The FIRST TWO LINES of your response must be (before any markdown sections):\n"
+                "TITLE: [Short descriptive title inferred from the meeting context]\n"
                 "PARTICIPANTS: Name1, Name2  "
                 "(Real human names ONLY. No products, companies, or technologies. If unsure, leave blank.)\n\n"
                 "## Executive Summary\n"
@@ -179,29 +183,83 @@ class LlmAnalyzerThread(QThread):
             raise Exception(f"HTTP {response.status_code}: {response.text}")
 
     def _parse_and_emit(self, content, cfg):
-        # Başlığı ve Katılımcıları ayıkla
+        """Başlığı ve katılımcıları LLM çıktısından ayıkla.
+        
+        LLM farklı formatlarda yazabilir:
+          BAŞLIK: Satış Toplantısı
+          **BAŞLIK:** Satış Toplantısı
+          Başlık: Satış Toplantısı
+        Bu nedenle hem satır bazlı hem regex tabanlı arama yap.
+        """
         title = cfg["default_title"]
         participants_str = ""
         lines = content.split('\n')
-        heading_key = cfg["heading"] + ":"
-        participants_key = "KATILIMCILAR:" if self.language == "tr" else "PARTICIPANTS:"
         
+        # Türkçe/İngilizce anahtar kelimeler (büyük harf)
+        if self.language == "tr":
+            heading_keys = ["BAŞLIK", "BASLIK", "TITLE"]
+            part_keys = ["KATILIMCILAR", "PARTICIPANTS"]
+        else:
+            heading_keys = ["TITLE", "BAŞLIK"]
+            part_keys = ["PARTICIPANTS", "KATILIMCILAR"]
+        
+        found_title = False
+        found_participants = False
         final_lines = []
+        
         for line in lines:
             stripped = line.strip()
-            # Markdown kalın tag'lerini (**) ve heading tag'lerini (###) görmezden gelmek için temizle
-            clean_line = stripped.replace("**", "").replace("*", "").replace("#", "").strip()
+            # Markdown süslemelerini temizle: **, *, #, ---, ===
+            clean_line = re.sub(r'[*#_`]', '', stripped).strip()
+            clean_upper = clean_line.upper()
             
-            if clean_line.upper().startswith(heading_key):
-                extracted = clean_line.split(":", 1)[1].strip()
-                if extracted:
-                    title = extracted
-            elif clean_line.upper().startswith(participants_key):
-                extracted = clean_line.split(":", 1)[1].strip()
-                if extracted:
-                    participants_str = extracted
-            else:
+            matched = False
+            
+            # Başlık satırı kontrolü
+            if not found_title:
+                for key in heading_keys:
+                    # "BAŞLIK:" veya "BAŞLIK :" formatlerini yakala
+                    if re.match(rf'^{re.escape(key)}\s*:', clean_upper):
+                        extracted = re.split(r':\s*', clean_line, maxsplit=1)
+                        if len(extracted) > 1 and extracted[1].strip():
+                            title = extracted[1].strip()
+                            found_title = True
+                        matched = True
+                        break
+            
+            # Katılımcı satırı kontrolü
+            if not matched and not found_participants:
+                for key in part_keys:
+                    if re.match(rf'^{re.escape(key)}\s*:', clean_upper):
+                        extracted = re.split(r':\s*', clean_line, maxsplit=1)
+                        if len(extracted) > 1 and extracted[1].strip():
+                            participants_str = extracted[1].strip()
+                            found_participants = True
+                        matched = True
+                        break
+            
+            if not matched:
                 final_lines.append(line)
-
+        
+        # Regex fallback: İlk 30 satırda başlık veya katılımcı bulunamadıysa tüm metni tara
+        if not found_title or not found_participants:
+            first_block = '\n'.join(lines[:30])
+            if not found_title:
+                for key in heading_keys:
+                    m = re.search(rf'^[*#\s]*{re.escape(key)}[*#\s]*:\s*(.+)$',
+                                  first_block, re.MULTILINE | re.IGNORECASE)
+                    if m and m.group(1).strip():
+                        title = m.group(1).strip().replace('**', '').replace('*', '').strip()
+                        found_title = True
+                        break
+            if not found_participants:
+                for key in part_keys:
+                    m = re.search(rf'^[*#\s]*{re.escape(key)}[*#\s]*:\s*(.+)$',
+                                  first_block, re.MULTILINE | re.IGNORECASE)
+                    if m and m.group(1).strip():
+                        participants_str = m.group(1).strip().replace('**', '').replace('*', '').strip()
+                        found_participants = True
+                        break
+        
         summary_body = '\n'.join(final_lines).strip()
         self.analysis_ready.emit(title, participants_str, summary_body)

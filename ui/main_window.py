@@ -641,7 +641,7 @@ class HistoryDialog(QDialog):
         dates_layout = QHBoxLayout()
         self.date_from = QDateEdit()
         self.date_from.setCalendarPopup(True)
-        self.date_from.setDate(QDate.currentDate().addDays(-5))
+        self.date_from.setDate(QDate.currentDate())
         self.date_from.setStyleSheet("background-color: #181825; color: #CDD6F4; border: 1px solid #45475A;")
         
         self.date_to = QDateEdit()
