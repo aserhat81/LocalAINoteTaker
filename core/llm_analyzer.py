@@ -102,44 +102,106 @@ class LlmAnalyzerThread(QThread):
 
     def run(self):
         cfg = self.LANG_CONFIG[self.language]
-        
-        # Eğer çok uzunsa (yaklaşık 3000 token / 12000 karaktere denk), parçalara böl (Map-Reduce)
+
+        # Her bir LLM çağrısı için max output token (model güvenli sınır)
+        MAX_OUTPUT_TOKENS = 2048
+        # Her chunk için max karakter (~3000 token)
         MAX_CHARS = 12000
-        
+
         try:
             if len(self.transcript) <= MAX_CHARS:
-                # Kısa/Orta toplantı - Tek seferde analiz (Eski Yöntem)
+                # Kısa/Orta toplantı — tek seferde direkt analiz
                 final_text = self.transcript
             else:
-                # Uzun Toplantı - Parçalara bölerek analiz
-                self.analysis_progress.emit("Uzun toplantı tespit edildi. Metin parçalara bölünerek analiz ediliyor (bu işlem normalden uzun sürecektir)...")
-                
+                # ── MAP AŞAMASI ────────────────────────────────────────────
+                # Uzun transkripti parçalara böl, her birini özetle
+                self.analysis_progress.emit(
+                    "Uzun toplantı tespit edildi. Metin parçalara bölünerek analiz ediliyor "
+                    "(bu işlem normalden uzun sürecektir)..."
+                )
                 chunks = self._split_transcript(self.transcript, MAX_CHARS)
-                intermediate_summaries = []
-                
-                for i, chunk in enumerate(chunks):
-                    # Ara özet çıkart
-                    self.analysis_progress.emit(f"Parça {i+1}/{len(chunks)} özetleniyor...")
-                    intermediate_prompt = cfg["intermediate"] + chunk
-                    chunk_summary = self._call_llm(
-                        system_prompt="Sen parçalı transkriptleri analiz eden bir asistansın. Her detayı koru." if self.language == "tr" else "You are an assistant that analyzes transcript parts. Keep every detail.", 
-                        user_prompt=intermediate_prompt,
-                        max_tokens=2048
-                    )
-                    intermediate_summaries.append(f"--- BÖLÜM {i+1} ÖZETİ ---\n{chunk_summary}\n")
-                
-                # Birleştirilmiş metni final prompt'a sokmak üzere hazırla
-                final_text = "DİKKAT: Aşağıdaki metin doğrudan transkript değil, transkriptin farklı bölümlerinden çıkarılmış detaylı ara özetlerin birleşimidir.\n\n" + "\n".join(intermediate_summaries)
-                self.analysis_progress.emit("Ara özetler birleştiriliyor. Final tablo hazırlanıyor...")
+                total_chunks = len(chunks)
+                raw_summaries = []
 
-            # Final Analizi yap (İster doğrudan transkript, ister birleştirilmiş ara özetler)
+                for i, chunk in enumerate(chunks):
+                    self.analysis_progress.emit(f"Bölüm {i+1}/{total_chunks} özetleniyor...")
+                    intermediate_prompt = cfg["intermediate"] + chunk
+                    sys_prompt = (
+                        "Sen parçalı transkriptleri analiz eden bir asistansın. Her detayı koru."
+                        if self.language == "tr"
+                        else "You are an assistant that analyzes transcript parts. Keep every detail."
+                    )
+                    chunk_summary = self._call_llm(
+                        system_prompt=sys_prompt,
+                        user_prompt=intermediate_prompt,
+                        max_tokens=MAX_OUTPUT_TOKENS
+                    )
+                    raw_summaries.append(
+                        f"========================================\n"
+                        f"[BÖLÜM {i+1}/{total_chunks} - "
+                        f"{'TOPLANTININ BAŞI' if i == 0 else ('TOPLANTININ SONU' if i == total_chunks - 1 else f'ORTA KISIM {i+1}')}]\n"
+                        f"========================================\n"
+                        f"{chunk_summary}\n"
+                        f"[/BÖLÜM {i+1}]\n"
+                    )
+
+                # ── REDUCE AŞAMASI ─────────────────────────────────────────
+                # Eğer ara özetlerin toplamı hâlâ büyükse, onları da chunk'layarak özetle
+                # (hiçbir zaman MAX_CHARS'ı geçmeyene kadar)
+                final_text = self._reduce_summaries(raw_summaries, cfg, MAX_CHARS, MAX_OUTPUT_TOKENS)
+
+            # ── FINAL ANALİZ ───────────────────────────────────────────────
+            # Artık final_text her zaman 12 000 karakterin altında → model rahat çalışır
+            self.analysis_progress.emit("Final rapor oluşturuluyor...")
             prompt = f"{cfg['instructions']}\n\nToplantı Verisi:\n{final_text}"
-            content = self._call_llm(cfg["system"], prompt, max_tokens=3072)
+            content = self._call_llm(cfg["system"], prompt, max_tokens=MAX_OUTPUT_TOKENS)
 
             self._parse_and_emit(content, cfg)
 
         except Exception as e:
             self.analysis_error.emit(f"Analiz Hatası: {str(e)}")
+
+    def _reduce_summaries(self, summaries, cfg, max_chars, max_tokens):
+        """Ara özetleri tekrar tekrar birleştirip sığana kadar özet üretir (recursive reduce)."""
+        combined = "\n".join(summaries)
+        if len(combined) <= max_chars:
+            # Tüm özetler tek chunk'a sığıyor — birleştir ve döndür
+            total = len(summaries)
+            header = (
+                f"DİKKAT: Aşağıdaki {total} BÖLÜMDEN oluşan ara özetler, "
+                f"tek bir toplantının başından sonuna ait bilgileri içerir.\n"
+                f"BÖLÜM 1'DEN BÖLÜM {total}'E KADAR tüm konuları eşit ağırlıkla kapsayan "
+                f"kapsamlı bir özet oluştur. Sadece son bölüme odaklanma.\n\n"
+                if self.language == "tr"
+                else
+                f"NOTE: The following {total} SECTION summaries cover a single meeting from start to finish.\n"
+                f"Cover ALL SECTIONS from SECTION 1 to SECTION {total} with equal weight. "
+                f"Do NOT focus only on the last section.\n\n"
+            )
+            return header + combined
+
+        # Hâlâ büyük → yeni bir map-reduce turu
+        chunks = self._split_transcript(combined, max_chars)
+        total_chunks = len(chunks)
+        new_summaries = []
+        sys_prompt = (
+            "Sen parçalı transkriptleri analiz eden bir asistansın. Her detayı koru."
+            if self.language == "tr"
+            else "You are an assistant that analyzes transcript parts. Keep every detail."
+        )
+        for i, chunk in enumerate(chunks):
+            self.analysis_progress.emit(
+                f"Özetler yeniden birleştiriliyor: {i+1}/{total_chunks}..."
+            )
+            chunk_summary = self._call_llm(
+                system_prompt=sys_prompt,
+                user_prompt=(cfg["intermediate"] + chunk),
+                max_tokens=max_tokens
+            )
+            new_summaries.append(
+                f"[ÖZET GRUBU {i+1}/{total_chunks}]\n{chunk_summary}\n[/ÖZET GRUBU {i+1}]\n"
+            )
+        return self._reduce_summaries(new_summaries, cfg, max_chars, max_tokens)
 
     def _split_transcript(self, text, max_len):
         """Metni max_len karakteri aşmayacak şekilde satır bazlı veya kırparak böler."""
