@@ -1,327 +1,473 @@
-import requests
 import re
+
+import requests
 from PySide6.QtCore import QThread, Signal
 
 
 class LlmAnalyzerThread(QThread):
-    analysis_ready = Signal(str, str, str)  # title, participants, markdown_summary
+    analysis_ready = Signal(str, str, str)  # title, participants, markdown_notes
     analysis_error = Signal(str)
     analysis_progress = Signal(str)
 
-    MODEL_NAME = "qwen3:8b"  # Aktif model — buradan değiştirince her yerde güncellenir
+    MODEL_NAME = "qwen3.5:4b"
+
+    # qwen3.5:4b icin daha genis baglam kullan; erken sikistirmayi azalt.
+    MAX_DIRECT_TRANSCRIPT_CHARS = 120000
+    MAX_CHARS_PER_CHUNK = 45000
+    MAX_MERGE_INPUT_CHARS = 90000
+
+    MAP_OUTPUT_TOKENS = 2200
+    MERGE_OUTPUT_TOKENS = 2600
+    FINAL_OUTPUT_TOKENS = 4096
+    API_TIMEOUT_SECONDS = 18000
+
     LANG_CONFIG = {
         "tr": {
+            "title_key": "BAŞLIK",
+            "participants_key": "KATILIMCILAR",
+            "default_title": "Genel Toplanti Notu",
             "system": (
-                "Sen profesyonel bir toplantı analiz uzmanı ve yönetici asistanısın. "
-                "Görevin transkriptteki TÜM konuları eksiksiz yakalamak ve yapılandırılmış bir rapor üretmektir. "
-                "Transkriptte Whisper kaynaklı fonetik hatalar veya yarım kalmış cümleler olabilir; "
-                "bunları toplantı bağlamından yola çıkarak düzelterek genel anlamı doğru tahmin et. "
-                "Tüm yanıtlarını TÜRKÇE ver."
+                "Sen kurumsal bir toplanti notu ve karar kaydi uzmansin. "
+                "Yalnizca verilen transkripte dayanarak yaz. "
+                "Transkriptte olmayan hicbir bilgiyi ekleme, tahmin etme, tamamlama veya dis bilgi kullanma. "
+                "Whisper kaynakli bozuk cumleleri ancak transkriptin kendi baglami acikca destekliyorsa toparla. "
+                "Bilgi belirsizse 'transkriptte net degil', hic yoksa 'belirtilmedi' yaz. "
+                "Tekrarlari temizle, daginik konusmalari toparla, ama anlami degistirme. "
+                "Cikti dili profesyonel, kurumsal ve acik Turkce olsun."
             ),
-            "heading": "BAŞLIK",
-            "default_title": "Genel Toplantı Özeti",
-            "instructions": (
-                "Aşağıdaki toplantı transkriptini dikkatle oku. Whisper kaynaklı bozuk veya eksik cümleleri "
-                "bağlamı kullanarak düzelt, sonra aşağıdaki yapıya göre TÜRKÇE analiz yap.\n\n"
-                "YANITINİN İLK İKİ SATIRI AŞAĞIDAKI FORMAT ŞEKLİNDE OLMALIDIR "
-                "(Markdown bölümlerinden ÖNCE yaz):\n"
-                "BAŞLIK: [Toplantı bağlamından çıkarılan kısa ve açıklayıcı konu başlığı]\n"
-                "KATILIMCILAR: İsim1, İsim2  "
-                "(Sadece gerçek insan isimleri. Ürün, şirket, teknoloji ismi KESİNLİKLE dahil etme. "
-                "Emin değilsen boş bırak.)\n\n"
-                "## Yönetici Özeti\n"
-                "Toplantının ana amacını, en kritik karar ve çıktıları kısaca (3-6 cümle) anlat.\n\n"
-                "## Toplantı Özeti\n"
-                "Toplantıda konuşulan tüm konuları daha geniş biçimde ve kimin ne söylediği dahil detaylı anlat. "
-                "Hiçbir konuyu atlamadan kapsamlı bir şekilde yaz.\n\n"
+            "map_system": (
+                "Sen uzun toplanti transkriptlerinin her parcasindan kayipsiz, kanit-odakli notlar cikaran bir asistansin. "
+                "Yalnizca verilen parca icindeki bilgileri kullan."
+            ),
+            "merge_system": (
+                "Sen parcalardan gelen yapi-landirilmis toplanti notlarini birlestiren bir asistansin. "
+                "Hicbir benzersiz maddeyi kaybetme, tekrar edenleri birlestir, belirsizlikleri koru."
+            ),
+            "map_prompt": (
+                "Asagida uzun bir toplantinin {current}/{total}. parcasi var.\n"
+                "Bu parca icin YALNIZCA transkriptte gecen bilgileri cikart.\n"
+                "Kurallar:\n"
+                "- Uydurma yapma.\n"
+                "- Emin degilsen 'transkriptte net degil' yaz.\n"
+                "- Bilgi hic yoksa 'belirtilmedi' yaz.\n"
+                "- Kisa ama kayipsiz ol.\n"
+                "- Aksiyon, sorumlu, termin, tarih, risk, blokaj ve acik kalan maddeleri ozellikle ayikla.\n"
+                "- Her maddede mumkun oldugunca hangi konudan geldigi anlasilsin.\n\n"
+                "Su yapiyi kullan:\n"
+                "BASLIK_ADAYLARI:\n"
+                "- ...\n"
+                "KATILIMCI_ADAYLARI:\n"
+                "- ...\n"
+                "TOPLANTININ_AMACI:\n"
+                "- ...\n"
+                "KISA_OZET:\n"
+                "- ...\n"
+                "ELE_ALINAN_KONULAR:\n"
+                "- ...\n"
+                "ALINAN_KARARLAR:\n"
+                "- ...\n"
+                "AKSIYON_MADDELERI:\n"
+                "- Aksiyon: ... | Sorumlu: ... | Termin: ...\n"
+                "SORUMLULAR:\n"
+                "- Kisi: ... | Sorumluluk: ...\n"
+                "TERMIN_TARIH_BILGILERI:\n"
+                "- ...\n"
+                "ACIK_KALAN_KONULAR:\n"
+                "- ...\n"
+                "RISKLER_BLOKAJLAR:\n"
+                "- ...\n"
+                "BELIRSIZ_NOKTALAR:\n"
+                "- ...\n\n"
+                "Transkript Parcasi:\n{transcript}"
+            ),
+            "merge_prompt": (
+                "Asagida farkli transkript parcaciklarindan cikartilmis yapi-landirilmis notlar var.\n"
+                "Bunlari TEK bir yapiya birlestir.\n"
+                "Kurallar:\n"
+                "- Hicbir benzersiz konuyu, karari, aksiyonu, tarihi, sorumluyu, riski veya acik konuyu dusurme.\n"
+                "- Tekrarlari birlestir ama bilgi kaybetme.\n"
+                "- Supheli yerlerde 'transkriptte net degil' ifadesini koru.\n"
+                "- Yeni bilgi uydurma.\n"
+                "- Yine ayni basliklarla yaz.\n\n"
+                "Birlesecek Notlar:\n{material}"
+            ),
+            "final_from_transcript": (
+                "Asagidaki ham toplanti transkriptinden gercek toplanti notu uret.\n"
+                "Yalnizca transkripte dayan.\n\n"
+                "Zorunlu kurallar:\n"
+                "- Ilk iki satir ASAGIDAKI GIBI olsun:\n"
+                "BAŞLIK: [kisa ve acik toplanti basligi]\n"
+                "KATILIMCILAR: [yalnizca transkriptte acikca gecen gercek kisi adlari; yoksa bos birak]\n"
+                "- Sonrasinda tam olarak su bolumleri yaz:\n"
+                "## Toplantı Başlığı\n"
+                "## Toplantının Amacı\n"
+                "## Kısa Yönetici Özeti\n"
+                "## Ele Alınan Konular\n"
                 "## Alınan Kararlar\n"
-                "Toplantıda kesinleştirilen kararları madde madde listele. "
-                "Karar yoksa 'Bu toplantıda kesinleştirilmiş bir karar bulunmamaktadır.' yaz.\n\n"
-                "## Toplantı Kısa Notları (Meeting Minutes)\n"
-                "Kronolojik sırayla toplantının akışını, kimin ne zaman ne söylediğini ve varsa eylem maddelerini yaz. "
-                "Eylem maddelerini '- **[Kim]:** [Yapılacak iş]' formatıyla listele.\n\n"
-                "UYARI: Yukarıdaki 4 bölümü mutlaka doldur. "
-                "Transkriptteki her konuyu 'Toplantı Özeti' ve 'Toplantı Kısa Notları' bölümlerine yansıt."
+                "## Aksiyon Maddeleri\n"
+                "## Sorumlular\n"
+                "## Termin / Tarih Bilgileri\n"
+                "## Açık Kalan Konular\n"
+                "## Riskler / Blokajlar\n"
+                "- Transkriptte olmayan bilgi ekleme.\n"
+                "- Belirsizse 'transkriptte net degil', yoksa 'belirtilmedi' yaz.\n"
+                "- Gereksiz tekrar temizlensin.\n"
+                "- Aksiyonlari ve sahiplerini mumkun oldugunca yakala.\n"
+                "- Tarih, saat, teslim tarihi ve yapilacaklari ozellikle ayikla.\n"
+                "- Kurumsal, profesyonel Turkce kullan.\n\n"
+                "Ham Transkript:\n{transcript}"
             ),
-            "intermediate": (
-                "Aşağıda bir uzun toplantının BİR KISMINA ait transkript var. "
-                "Whisper kaynaklı fonetik hataları bağlamdan düzelterek, "
-                "bu kısımdaki konuşmaları kayıpsız biçimde maddeler halinde özetle:\n"
-                "- Konuşan kişilerin isimleri/etiketleri\n"
-                "- Konuşulan tüm detaylı konular ve tartışmalar\n"
-                "- Varsa alınan kararlar veya eylem maddeleri\n\n"
-                "Transkript Kısmı:\n"
-            )
+            "final_from_notes": (
+                "Asagidaki yapi-landirilmis, transkripte dayali parcali notlari kullanarak tek bir nihai toplanti notu uret.\n"
+                "Sadece bu malzemede bulunan bilgileri kullan; yeni bilgi ekleme.\n\n"
+                "Zorunlu kurallar:\n"
+                "- Ilk iki satir ASAGIDAKI GIBI olsun:\n"
+                "BAŞLIK: [kisa ve acik toplanti basligi]\n"
+                "KATILIMCILAR: [yalnizca acikca gecen gercek kisi adlari; yoksa bos birak]\n"
+                "- Sonrasinda tam olarak su bolumleri yaz:\n"
+                "## Toplantı Başlığı\n"
+                "## Toplantının Amacı\n"
+                "## Kısa Yönetici Özeti\n"
+                "## Ele Alınan Konular\n"
+                "## Alınan Kararlar\n"
+                "## Aksiyon Maddeleri\n"
+                "## Sorumlular\n"
+                "## Termin / Tarih Bilgileri\n"
+                "## Açık Kalan Konular\n"
+                "## Riskler / Blokajlar\n"
+                "- Cikti kayipsiz olsun; tum benzersiz maddeleri koru.\n"
+                "- Belirsizse 'transkriptte net degil', yoksa 'belirtilmedi' yaz.\n"
+                "- Tekrarlari temizle, anlami bozma.\n"
+                "- Kurumsal, profesyonel Turkce kullan.\n\n"
+                "Birlestirilmis Not Malzemesi:\n{material}"
+            ),
+            "final_progress": "Nihai toplanti notu olusturuluyor...",
+            "long_progress": "Uzun toplanti tespit edildi. Parca bazli toplanti notlari cikartilip birlestiriliyor...",
+            "chunk_progress": "Parca {current}/{total} isleniyor...",
+            "merge_progress": "Parcali notlar birlestiriliyor: {current}/{total}...",
+            "error_prefix": "Analiz Hatasi",
         },
         "en": {
+            "title_key": "TITLE",
+            "participants_key": "PARTICIPANTS",
+            "default_title": "General Meeting Notes",
             "system": (
-                "You are a professional meeting analyst and executive assistant. "
-                "Your job is to capture ALL topics from the transcript without exception and produce a structured report. "
-                "The transcript may contain Whisper-induced phonetic errors or incomplete sentences; "
-                "use meeting context to correct these and infer the intended meaning before analyzing. "
-                "Always respond in ENGLISH."
+                "You are a corporate meeting notes and decision-record specialist. "
+                "Use only the provided transcript. "
+                "Do not add, infer, complete, or assume facts that are not supported by the transcript. "
+                "Only repair Whisper errors when the transcript context clearly supports the repair. "
+                "If something is unclear, write 'not clear from transcript'. If absent, write 'not specified'. "
+                "Clean repetition and organize messy discussion without changing meaning. "
+                "Use professional, corporate English."
             ),
-            "heading": "TITLE",
-            "default_title": "General Meeting Summary",
-            "instructions": (
-                "Read the following meeting transcript carefully. Correct any Whisper-induced phonetic errors or "
-                "incomplete sentences using context, then produce an ENGLISH analysis with the structure below.\n\n"
-                "IMPORTANT: The FIRST TWO LINES of your response must be (before any markdown sections):\n"
-                "TITLE: [Short descriptive title inferred from the meeting context]\n"
-                "PARTICIPANTS: Name1, Name2  "
-                "(Real human names ONLY. No products, companies, or technologies. If unsure, leave blank.)\n\n"
+            "map_system": (
+                "You extract loss-minimized, evidence-based meeting notes from one transcript chunk at a time. "
+                "Use only the provided chunk."
+            ),
+            "merge_system": (
+                "You merge structured notes coming from multiple transcript chunks. "
+                "Do not lose unique facts, and preserve uncertainty."
+            ),
+            "map_prompt": (
+                "Below is chunk {current}/{total} from a long meeting transcript.\n"
+                "Extract ONLY what is explicitly supported by this chunk.\n"
+                "Rules:\n"
+                "- Do not hallucinate.\n"
+                "- If uncertain, write 'not clear from transcript'.\n"
+                "- If absent, write 'not specified'.\n"
+                "- Keep it concise but loss-minimized.\n"
+                "- Pay special attention to actions, owners, deadlines, dates, risks, blockers, and open items.\n\n"
+                "Use this structure:\n"
+                "TITLE_CANDIDATES:\n"
+                "- ...\n"
+                "PARTICIPANT_CANDIDATES:\n"
+                "- ...\n"
+                "MEETING_PURPOSE:\n"
+                "- ...\n"
+                "SHORT_SUMMARY:\n"
+                "- ...\n"
+                "TOPICS_DISCUSSED:\n"
+                "- ...\n"
+                "DECISIONS_MADE:\n"
+                "- ...\n"
+                "ACTION_ITEMS:\n"
+                "- Action: ... | Owner: ... | Deadline: ...\n"
+                "RESPONSIBILITIES:\n"
+                "- Person: ... | Responsibility: ...\n"
+                "DATES_AND_TIMELINES:\n"
+                "- ...\n"
+                "OPEN_ITEMS:\n"
+                "- ...\n"
+                "RISKS_AND_BLOCKERS:\n"
+                "- ...\n"
+                "UNCERTAIN_POINTS:\n"
+                "- ...\n\n"
+                "Transcript Chunk:\n{transcript}"
+            ),
+            "merge_prompt": (
+                "Below are structured notes extracted from several transcript chunks.\n"
+                "Merge them into a single structured note set.\n"
+                "Rules:\n"
+                "- Do not drop any unique topic, decision, action, date, owner, risk, or open issue.\n"
+                "- Merge duplicates without losing detail.\n"
+                "- Preserve uncertainty labels.\n"
+                "- Do not invent new facts.\n"
+                "- Keep the same section headings.\n\n"
+                "Notes To Merge:\n{material}"
+            ),
+            "final_from_transcript": (
+                "Create real meeting notes from the raw transcript below.\n"
+                "Use only the transcript.\n\n"
+                "Required rules:\n"
+                "- The first two lines must be exactly:\n"
+                "TITLE: [short descriptive meeting title]\n"
+                "PARTICIPANTS: [real human names only if clearly mentioned; otherwise leave blank]\n"
+                "- Then write exactly these sections:\n"
+                "## Meeting Title\n"
+                "## Meeting Purpose\n"
                 "## Executive Summary\n"
-                "Describe the main purpose of the meeting and the most critical decisions/outcomes in 3-6 sentences.\n\n"
-                "## Meeting Overview\n"
-                "Cover ALL topics discussed in detail, including who said what. Be comprehensive — miss nothing.\n\n"
+                "## Topics Discussed\n"
                 "## Decisions Made\n"
-                "List every decision that was finalized. If none, write 'No decisions were finalized in this meeting.'\n\n"
-                "## Meeting Minutes\n"
-                "In chronological order, note who said what and any action items. "
-                "Format action items as: '- **[Person]:** [Task]'\n\n"
-                "WARNING: All 4 sections above must be filled in. "
-                "Every topic in the transcript MUST appear in 'Meeting Overview' and 'Meeting Minutes'."
+                "## Action Items\n"
+                "## Owners\n"
+                "## Dates / Deadlines\n"
+                "## Open Issues\n"
+                "## Risks / Blockers\n"
+                "- Do not add unsupported information.\n"
+                "- If unclear, write 'not clear from transcript'; if absent, write 'not specified'.\n"
+                "- Remove unnecessary repetition.\n"
+                "- Capture actions, owners, dates, times, and deadlines as much as possible.\n"
+                "- Use professional corporate English.\n\n"
+                "Raw Transcript:\n{transcript}"
             ),
-            "intermediate": (
-                "Below is a PART of a long meeting transcript. "
-                "Correct any Whisper-induced phonetic errors using context, then "
-                "summarize this section in detail without losing information, using bullet points:\n"
-                "- Participant names/labels\n"
-                "- All detailed topics and discussions\n"
-                "- Any decisions or action items\n\n"
-                "Transcript Part:\n"
-            )
-        }
+            "final_from_notes": (
+                "Using the structured transcript-based notes below, create one final set of meeting notes.\n"
+                "Use only the information in this material.\n\n"
+                "Required rules:\n"
+                "- The first two lines must be exactly:\n"
+                "TITLE: [short descriptive meeting title]\n"
+                "PARTICIPANTS: [real human names only if clearly mentioned; otherwise leave blank]\n"
+                "- Then write exactly these sections:\n"
+                "## Meeting Title\n"
+                "## Meeting Purpose\n"
+                "## Executive Summary\n"
+                "## Topics Discussed\n"
+                "## Decisions Made\n"
+                "## Action Items\n"
+                "## Owners\n"
+                "## Dates / Deadlines\n"
+                "## Open Issues\n"
+                "## Risks / Blockers\n"
+                "- Keep all unique facts.\n"
+                "- If unclear, write 'not clear from transcript'; if absent, write 'not specified'.\n"
+                "- Remove repetition without changing meaning.\n"
+                "- Use professional corporate English.\n\n"
+                "Structured Notes:\n{material}"
+            ),
+            "final_progress": "Generating final meeting notes...",
+            "long_progress": "Long meeting detected. Extracting and merging chunk-based meeting notes...",
+            "chunk_progress": "Processing chunk {current}/{total}...",
+            "merge_progress": "Merging chunk notes: {current}/{total}...",
+            "error_prefix": "Analysis Error",
+        },
     }
 
     def __init__(self, transcript, language="tr"):
         super().__init__()
-        self.transcript = transcript
         self.language = language if language in self.LANG_CONFIG else "tr"
+        self.transcript = self._normalize_transcript(transcript)
         self.api_url = "http://127.0.0.1:52625/v1/chat/completions"
 
     def run(self):
         cfg = self.LANG_CONFIG[self.language]
 
-        # Her bir LLM çağrısı için max output token (model güvenli sınır)
-        MAX_OUTPUT_TOKENS = 2048
-        # Her chunk için max karakter (~3000 token)
-        MAX_CHARS = 12000
-
         try:
-            if len(self.transcript) <= MAX_CHARS:
-                # Kısa/Orta toplantı — tek seferde direkt analiz
-                final_text = self.transcript
+            if len(self.transcript) <= self.MAX_DIRECT_TRANSCRIPT_CHARS:
+                source_material = self.transcript
+                use_structured_merge = False
             else:
-                # ── MAP AŞAMASI ────────────────────────────────────────────
-                # Uzun transkripti parçalara böl, her birini özetle
-                self.analysis_progress.emit(
-                    "Uzun toplantı tespit edildi. Metin parçalara bölünerek analiz ediliyor "
-                    "(bu işlem normalden uzun sürecektir)..."
-                )
-                chunks = self._split_transcript(self.transcript, MAX_CHARS)
-                total_chunks = len(chunks)
-                raw_summaries = []
+                self.analysis_progress.emit(cfg["long_progress"])
+                source_material = self._build_structured_context(cfg)
+                use_structured_merge = True
 
-                for i, chunk in enumerate(chunks):
-                    self.analysis_progress.emit(f"Bölüm {i+1}/{total_chunks} özetleniyor...")
-                    intermediate_prompt = cfg["intermediate"] + chunk
-                    sys_prompt = (
-                        "Sen parçalı transkriptleri analiz eden bir asistansın. Her detayı koru."
-                        if self.language == "tr"
-                        else "You are an assistant that analyzes transcript parts. Keep every detail."
-                    )
-                    chunk_summary = self._call_llm(
-                        system_prompt=sys_prompt,
-                        user_prompt=intermediate_prompt,
-                        max_tokens=MAX_OUTPUT_TOKENS
-                    )
-                    raw_summaries.append(
-                        f"========================================\n"
-                        f"[BÖLÜM {i+1}/{total_chunks} - "
-                        f"{'TOPLANTININ BAŞI' if i == 0 else ('TOPLANTININ SONU' if i == total_chunks - 1 else f'ORTA KISIM {i+1}')}]\n"
-                        f"========================================\n"
-                        f"{chunk_summary}\n"
-                        f"[/BÖLÜM {i+1}]\n"
-                    )
-
-                # ── REDUCE AŞAMASI ─────────────────────────────────────────
-                # Eğer ara özetlerin toplamı hâlâ büyükse, onları da chunk'layarak özetle
-                # (hiçbir zaman MAX_CHARS'ı geçmeyene kadar)
-                final_text = self._reduce_summaries(raw_summaries, cfg, MAX_CHARS, MAX_OUTPUT_TOKENS)
-
-            # ── FINAL ANALİZ ───────────────────────────────────────────────
-            # Artık final_text her zaman 12 000 karakterin altında → model rahat çalışır
-            self.analysis_progress.emit("Final rapor oluşturuluyor...")
-            prompt = f"{cfg['instructions']}\n\nToplantı Verisi:\n{final_text}"
-            content = self._call_llm(cfg["system"], prompt, max_tokens=MAX_OUTPUT_TOKENS)
-
+            self.analysis_progress.emit(cfg["final_progress"])
+            content = self._generate_final_report(source_material, cfg, use_structured_merge)
             self._parse_and_emit(content, cfg)
-
         except Exception as e:
-            self.analysis_error.emit(f"Analiz Hatası: {str(e)}")
+            self.analysis_error.emit(f"{cfg['error_prefix']}: {str(e)}")
 
-    def _reduce_summaries(self, summaries, cfg, max_chars, max_tokens):
-        """Ara özetleri tekrar tekrar birleştirip sığana kadar özet üretir (recursive reduce)."""
-        combined = "\n".join(summaries)
-        if len(combined) <= max_chars:
-            # Tüm özetler tek chunk'a sığıyor — birleştir ve döndür
-            total = len(summaries)
-            header = (
-                f"DİKKAT: Aşağıdaki {total} BÖLÜMDEN oluşan ara özetler, "
-                f"tek bir toplantının başından sonuna ait bilgileri içerir.\n"
-                f"BÖLÜM 1'DEN BÖLÜM {total}'E KADAR tüm konuları eşit ağırlıkla kapsayan "
-                f"kapsamlı bir özet oluştur. Sadece son bölüme odaklanma.\n\n"
-                if self.language == "tr"
-                else
-                f"NOTE: The following {total} SECTION summaries cover a single meeting from start to finish.\n"
-                f"Cover ALL SECTIONS from SECTION 1 to SECTION {total} with equal weight. "
-                f"Do NOT focus only on the last section.\n\n"
-            )
-            return header + combined
-
-        # Hâlâ büyük → yeni bir map-reduce turu
-        chunks = self._split_transcript(combined, max_chars)
+    def _build_structured_context(self, cfg):
+        chunks = self._split_transcript(self.transcript, self.MAX_CHARS_PER_CHUNK)
         total_chunks = len(chunks)
-        new_summaries = []
-        sys_prompt = (
-            "Sen parçalı transkriptleri analiz eden bir asistansın. Her detayı koru."
-            if self.language == "tr"
-            else "You are an assistant that analyzes transcript parts. Keep every detail."
-        )
+        extracted_notes = []
+
         for i, chunk in enumerate(chunks):
             self.analysis_progress.emit(
-                f"Özetler yeniden birleştiriliyor: {i+1}/{total_chunks}..."
+                cfg["chunk_progress"].format(current=i + 1, total=total_chunks)
             )
-            chunk_summary = self._call_llm(
-                system_prompt=sys_prompt,
-                user_prompt=(cfg["intermediate"] + chunk),
-                max_tokens=max_tokens
+            prompt = cfg["map_prompt"].format(
+                current=i + 1,
+                total=total_chunks,
+                transcript=chunk,
             )
-            new_summaries.append(
-                f"[ÖZET GRUBU {i+1}/{total_chunks}]\n{chunk_summary}\n[/ÖZET GRUBU {i+1}]\n"
+            note = self._call_llm(
+                system_prompt=cfg["map_system"],
+                user_prompt=prompt,
+                max_tokens=self.MAP_OUTPUT_TOKENS,
             )
-        return self._reduce_summaries(new_summaries, cfg, max_chars, max_tokens)
+            extracted_notes.append(
+                f"=== CHUNK {i + 1}/{total_chunks} ===\n{note.strip()}\n"
+            )
+
+        return self._merge_structured_notes(extracted_notes, cfg)
+
+    def _merge_structured_notes(self, note_groups, cfg):
+        combined = "\n\n".join(note_groups).strip()
+        if len(combined) <= self.MAX_MERGE_INPUT_CHARS:
+            return combined
+
+        grouped_materials = self._split_transcript(combined, self.MAX_MERGE_INPUT_CHARS)
+        merged_groups = []
+        total_groups = len(grouped_materials)
+
+        for i, material in enumerate(grouped_materials):
+            self.analysis_progress.emit(
+                cfg["merge_progress"].format(current=i + 1, total=total_groups)
+            )
+            merged = self._call_llm(
+                system_prompt=cfg["merge_system"],
+                user_prompt=cfg["merge_prompt"].format(material=material),
+                max_tokens=self.MERGE_OUTPUT_TOKENS,
+            )
+            merged_groups.append(
+                f"=== MERGED GROUP {i + 1}/{total_groups} ===\n{merged.strip()}\n"
+            )
+
+        return self._merge_structured_notes(merged_groups, cfg)
+
+    def _generate_final_report(self, source_material, cfg, use_structured_merge):
+        if use_structured_merge:
+            prompt = cfg["final_from_notes"].format(material=source_material)
+        else:
+            prompt = cfg["final_from_transcript"].format(transcript=source_material)
+
+        return self._call_llm(
+            system_prompt=cfg["system"],
+            user_prompt=prompt,
+            max_tokens=self.FINAL_OUTPUT_TOKENS,
+        )
+
+    def _normalize_transcript(self, text):
+        text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
 
     def _split_transcript(self, text, max_len):
-        """Metni max_len karakteri aşmayacak şekilde satır bazlı veya kırparak böler."""
-        lines = text.split('\n')
+        lines = text.split("\n")
         chunks = []
         current_chunk = ""
-        
+
         for line in lines:
             if len(current_chunk) + len(line) + 1 > max_len:
                 if current_chunk:
                     chunks.append(current_chunk.strip())
                     current_chunk = line + "\n"
-                else: # Tek bir satır bile çok uzunsa
+                else:
                     chunks.append(line[:max_len])
                     current_chunk = line[max_len:] + "\n"
             else:
                 current_chunk += line + "\n"
-                
+
         if current_chunk.strip():
             chunks.append(current_chunk.strip())
+
         return chunks
 
     def _call_llm(self, system_prompt, user_prompt, max_tokens):
-        """API çağrısını yapar ve sadece yanıt stringini döner."""
         data = {
             "model": self.MODEL_NAME,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": user_prompt}
+                {"role": "user", "content": user_prompt},
             ],
-            "temperature": 0.2,
-            "repeat_penalty": 1.15,
+            "temperature": 0.0,
+            "repeat_penalty": 1.1,
             "max_tokens": max_tokens,
-            "chat_template_kwargs": {"enable_thinking": False}
+            "chat_template_kwargs": {"enable_thinking": False},
         }
-        response = requests.post(self.api_url, json=data, timeout=18000)
+        response = requests.post(self.api_url, json=data, timeout=self.API_TIMEOUT_SECONDS)
         if response.status_code == 200:
             result = response.json()
-            return result['choices'][0]['message']['content']
-        else:
-            raise Exception(f"HTTP {response.status_code}: {response.text}")
+            return result["choices"][0]["message"]["content"]
+        raise Exception(f"HTTP {response.status_code}: {response.text}")
 
     def _parse_and_emit(self, content, cfg):
-        """Başlığı ve katılımcıları LLM çıktısından ayıkla.
-        
-        LLM farklı formatlarda yazabilir:
-          BAŞLIK: Satış Toplantısı
-          **BAŞLIK:** Satış Toplantısı
-          Başlık: Satış Toplantısı
-        Bu nedenle hem satır bazlı hem regex tabanlı arama yap.
-        """
         title = cfg["default_title"]
         participants_str = ""
-        lines = content.split('\n')
-        
-        # Türkçe/İngilizce anahtar kelimeler (büyük harf)
-        if self.language == "tr":
-            heading_keys = ["BAŞLIK", "BASLIK", "TITLE"]
-            part_keys = ["KATILIMCILAR", "PARTICIPANTS"]
-        else:
-            heading_keys = ["TITLE", "BAŞLIK"]
-            part_keys = ["PARTICIPANTS", "KATILIMCILAR"]
-        
+        lines = content.split("\n")
+
+        heading_keys = [cfg["title_key"], "TITLE", "BASLIK", "BAŞLIK"]
+        part_keys = [cfg["participants_key"], "PARTICIPANTS", "KATILIMCILAR"]
+
         found_title = False
         found_participants = False
         final_lines = []
-        
+
         for line in lines:
             stripped = line.strip()
-            # Markdown süslemelerini temizle: **, *, #, ---, ===
-            clean_line = re.sub(r'[*#_`]', '', stripped).strip()
+            clean_line = re.sub(r"[*#_`]", "", stripped).strip()
             clean_upper = clean_line.upper()
-            
             matched = False
-            
-            # Başlık satırı kontrolü
+
             if not found_title:
                 for key in heading_keys:
-                    # "BAŞLIK:" veya "BAŞLIK :" formatlerini yakala
-                    if re.match(rf'^{re.escape(key)}\s*:', clean_upper):
-                        extracted = re.split(r':\s*', clean_line, maxsplit=1)
+                    if re.match(rf"^{re.escape(key)}\s*:", clean_upper):
+                        extracted = re.split(r":\s*", clean_line, maxsplit=1)
                         if len(extracted) > 1 and extracted[1].strip():
                             title = extracted[1].strip()
                             found_title = True
                         matched = True
                         break
-            
-            # Katılımcı satırı kontrolü
+
             if not matched and not found_participants:
                 for key in part_keys:
-                    if re.match(rf'^{re.escape(key)}\s*:', clean_upper):
-                        extracted = re.split(r':\s*', clean_line, maxsplit=1)
+                    if re.match(rf"^{re.escape(key)}\s*:", clean_upper):
+                        extracted = re.split(r":\s*", clean_line, maxsplit=1)
                         if len(extracted) > 1 and extracted[1].strip():
                             participants_str = extracted[1].strip()
                             found_participants = True
                         matched = True
                         break
-            
+
             if not matched:
                 final_lines.append(line)
-        
-        # Regex fallback: İlk 30 satırda başlık veya katılımcı bulunamadıysa tüm metni tara
+
         if not found_title or not found_participants:
-            first_block = '\n'.join(lines[:30])
+            first_block = "\n".join(lines[:30])
             if not found_title:
                 for key in heading_keys:
-                    m = re.search(rf'^[*#\s]*{re.escape(key)}[*#\s]*:\s*(.+)$',
-                                  first_block, re.MULTILINE | re.IGNORECASE)
-                    if m and m.group(1).strip():
-                        title = m.group(1).strip().replace('**', '').replace('*', '').strip()
+                    match = re.search(
+                        rf"^[*#\s]*{re.escape(key)}[*#\s]*:\s*(.+)$",
+                        first_block,
+                        re.MULTILINE | re.IGNORECASE,
+                    )
+                    if match and match.group(1).strip():
+                        title = match.group(1).strip().replace("**", "").replace("*", "").strip()
                         found_title = True
                         break
             if not found_participants:
                 for key in part_keys:
-                    m = re.search(rf'^[*#\s]*{re.escape(key)}[*#\s]*:\s*(.+)$',
-                                  first_block, re.MULTILINE | re.IGNORECASE)
-                    if m and m.group(1).strip():
-                        participants_str = m.group(1).strip().replace('**', '').replace('*', '').strip()
+                    match = re.search(
+                        rf"^[*#\s]*{re.escape(key)}[*#\s]*:\s*(.+)$",
+                        first_block,
+                        re.MULTILINE | re.IGNORECASE,
+                    )
+                    if match and match.group(1).strip():
+                        participants_str = (
+                            match.group(1).strip().replace("**", "").replace("*", "").strip()
+                        )
                         found_participants = True
                         break
-        
-        summary_body = '\n'.join(final_lines).strip()
+
+        summary_body = "\n".join(final_lines).strip()
         self.analysis_ready.emit(title, participants_str, summary_body)

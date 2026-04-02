@@ -51,9 +51,9 @@ I18N = {
         "subtitle_placeholder": "Altyazılar burada gerçek zamanlı olarak akacak...",
         "status_ready": "Sistem hazır. Lütfen FastFlowLM servisini başlatın.",
         "rec_started": "<b>--- Toplantı Kaydı Başladı ---</b><br>",
-        "analyzing": "--- Toplantı Bitti. {model} ile Analiz Ediliyor... ---",
-        "analyzing_status": "Toplantı özetleniyor, AI çalışıyor...",
-        "saved_status": "Kayıt veritabanına eklendi.",
+        "analyzing": "--- Toplantı Bitti. {model} ile toplantı notu hazırlanıyor... ---",
+        "analyzing_status": "Toplantı notları hazırlanıyor, AI çalışıyor...",
+        "saved_status": "Toplantı notu veritabanına kaydedildi.",
         "email_subject": "Toplantı Notu: ",
         "history_title": "Geçmiş Toplantılar",
         "history_list_label": "Toplantılar",
@@ -113,7 +113,7 @@ I18N = {
         "btn_refresh_mics": "🔄 Yenile",
         "btn_toggle_meetings": "📅 Toplantı Listesi",
         "analysis_done_title": "Analiz Tamamlandı",
-        "analysis_done_body": "Toplantı özeti hazır ve kaydedildi.",
+        "analysis_done_body": "Toplantı notu hazır ve kaydedildi.",
     },
     "en": {
         "window_title": "Local AI Note Taker by Serhat",
@@ -138,9 +138,9 @@ I18N = {
         "subtitle_placeholder": "Real-time subtitles will appear here...",
         "status_ready": "Ready. Please start the FastFlowLM service.",
         "rec_started": "<b>--- Meeting Recording Started ---</b><br>",
-        "analyzing": "--- Meeting Ended. Analyzing with {model}... ---",
-        "analyzing_status": "Summarizing meeting, AI is working...",
-        "saved_status": "Meeting saved to database.",
+        "analyzing": "--- Meeting Ended. Preparing meeting notes with {model}... ---",
+        "analyzing_status": "Preparing meeting notes, AI is working...",
+        "saved_status": "Meeting notes saved to database.",
         "email_subject": "Meeting Notes: ",
         "history_title": "Meeting History",
         "history_list_label": "Meetings",
@@ -200,7 +200,7 @@ I18N = {
         "btn_refresh_mics": "🔄 Refresh",
         "btn_toggle_meetings": "📅 Meeting List",
         "analysis_done_title": "Analysis Completed",
-        "analysis_done_body": "The meeting summary is ready and saved.",
+        "analysis_done_body": "The meeting notes are ready and saved.",
     }
 }
 
