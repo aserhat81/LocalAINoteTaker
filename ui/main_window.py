@@ -911,6 +911,7 @@ class MainWindow(QMainWindow):
         self.audio_manager = AudioCaptureManager()
         self.audio_manager.chunk_ready.connect(self.on_audio_chunk_ready)
         self.db = DatabaseManager()
+        self.flm_model_name = self.db.get_setting("flm_model_name", self.flm_manager.DEFAULT_MODEL)
         
         # Load ICS URL from DB
         ics_url = self.db.get_setting("ics_url", "")
@@ -1157,6 +1158,10 @@ class MainWindow(QMainWindow):
         self.ics_input.setPlaceholderText(t["ics_url_ph"])
         self.btn_save_ics.setText(t["btn_save_ics"])
         self.btn_toggle_meetings.setText(t["btn_toggle_meetings"])
+        if hasattr(self, 'flm_model_label'):
+            self.flm_model_label.setText("Model:")
+        if hasattr(self, 'flm_model_input'):
+            self.flm_model_input.setPlaceholderText("qwen3.5:4b")
         if hasattr(self, 'btn_refresh_mics'):
             self.btn_refresh_mics.setText(t["btn_refresh_mics"])
 
@@ -1177,9 +1182,13 @@ class MainWindow(QMainWindow):
         if self.flm_manager.is_ready:
             self.status_indicator.setText("🟢 " + ("Çalışıyor" if self._lang == "tr" else "Running"))
             self.btn_start_flm.setText(t["btn_stop_flm"])
+            if hasattr(self, 'flm_model_input'):
+                self.flm_model_input.setEnabled(False)
         else:
             self.status_indicator.setText(t["status_off"])
             self.btn_start_flm.setText(t["btn_start_flm"])
+            if hasattr(self, 'flm_model_input'):
+                self.flm_model_input.setEnabled(True)
 
         # Mic combo varsayılan
         if self.mic_combo.count() > 0:
@@ -1231,10 +1240,24 @@ class MainWindow(QMainWindow):
         service_layout = QHBoxLayout(self.service_group)
         self.status_indicator = QLabel()
         self.status_indicator.setStyleSheet("color: #F38BA8; font-weight: bold; font-size: 14px;")
+        self.flm_model_label = QLabel("Model:")
+        self.flm_model_label.setStyleSheet("color: #BAC2DE;")
+        self.flm_model_input = QLineEdit()
+        self.flm_model_input.setText(self.flm_model_name)
+        self.flm_model_input.setPlaceholderText("qwen3.5:4b")
+        self.flm_model_input.setFixedWidth(180)
+        self.flm_model_input.editingFinished.connect(self.save_flm_model_setting)
+        self.flm_model_input.setStyleSheet(
+            "background-color: #313244; color: #CDD6F4; border: 1px solid #45475A; "
+            "border-radius: 4px; padding: 4px 8px;"
+        )
         self.btn_start_flm = QPushButton()
         self.btn_start_flm.setStyleSheet("background-color: #A6E3A1; color: #11111B;")
         self.btn_start_flm.clicked.connect(self.toggle_flm_service)
         service_layout.addWidget(self.status_indicator)
+        service_layout.addSpacing(10)
+        service_layout.addWidget(self.flm_model_label)
+        service_layout.addWidget(self.flm_model_input)
         service_layout.addWidget(self.btn_start_flm)
         service_layout.addStretch()
 
@@ -1368,13 +1391,24 @@ class MainWindow(QMainWindow):
 
     # ─── FLM ─────────────────────────────────────────────────────────────────
 
+    def get_selected_flm_model(self):
+        model_name = self.flm_model_input.text().strip()
+        return model_name or self.flm_manager.DEFAULT_MODEL
+
+    def save_flm_model_setting(self):
+        model_name = self.get_selected_flm_model()
+        self.flm_model_input.setText(model_name)
+        self.db.save_setting("flm_model_name", model_name)
+
     def toggle_flm_service(self):
         if not self.flm_manager.is_running:
+            self.save_flm_model_setting()
+            self.flm_model_input.setEnabled(False)
             self.btn_start_flm.setText(self.t("btn_stop_flm"))
             self.btn_start_flm.setStyleSheet("background-color: #F38BA8; color: #11111B;")
             self.status_indicator.setText("🟡 " + ("Başlatılıyor..." if self._lang == "tr" else "Starting..."))
             self.status_indicator.setStyleSheet("color: #F9E2AF; font-weight: bold; font-size: 14px;")
-            self.flm_manager.start_service()
+            self.flm_manager.start_service(self.get_selected_flm_model())
         else:
             self.flm_manager.stop_service()
 
@@ -1385,6 +1419,7 @@ class MainWindow(QMainWindow):
             self.btn_start_flm.setText(self.t("btn_stop_flm"))
             self.btn_start_flm.setStyleSheet("background-color: #F38BA8; color: #11111B;")
             self.record_group.setEnabled(True)
+            self.flm_model_input.setEnabled(False)
             self.statusBar_widget.showMessage(f"FLM: {message}")
         else:
             loading_words = ["Başlatılıyor", "Loading", "Configuring", "Starting", "Modeller"]
@@ -1397,6 +1432,7 @@ class MainWindow(QMainWindow):
                 self.btn_start_flm.setText(self.t("btn_start_flm"))
                 self.btn_start_flm.setStyleSheet("background-color: #A6E3A1; color: #11111B;")
                 self.record_group.setEnabled(False)
+                self.flm_model_input.setEnabled(True)
             self.statusBar_widget.showMessage(f"FLM: {message}")
 
     # ─── Kayıt ───────────────────────────────────────────────────────────────
