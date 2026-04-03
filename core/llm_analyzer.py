@@ -12,13 +12,13 @@ class LlmAnalyzerThread(QThread):
     MODEL_NAME = "qwen3.5:4b"
 
     # qwen3.5:4b icin daha genis baglam kullan; erken sikistirmayi azalt.
-    MAX_DIRECT_TRANSCRIPT_CHARS = 120000
-    MAX_CHARS_PER_CHUNK = 45000
-    MAX_MERGE_INPUT_CHARS = 90000
+    MAX_DIRECT_TRANSCRIPT_CHARS = 18000
+    MAX_CHARS_PER_CHUNK = 14000
+    MAX_MERGE_INPUT_CHARS = 24000
 
-    MAP_OUTPUT_TOKENS = 2200
-    MERGE_OUTPUT_TOKENS = 2600
-    FINAL_OUTPUT_TOKENS = 4096
+    MAP_OUTPUT_TOKENS = 1400
+    MERGE_OUTPUT_TOKENS = 1800
+    FINAL_OUTPUT_TOKENS = 2400
     API_TIMEOUT_SECONDS = 18000
 
     LANG_CONFIG = {
@@ -396,10 +396,78 @@ class LlmAnalyzerThread(QThread):
             "chat_template_kwargs": {"enable_thinking": False},
         }
         response = requests.post(self.api_url, json=data, timeout=self.API_TIMEOUT_SECONDS)
-        if response.status_code == 200:
+        response_text = response.text
+
+        if response.status_code != 200:
+            raise Exception(f"HTTP {response.status_code}: {self._shorten_error_text(response_text)}")
+
+        try:
             result = response.json()
-            return result["choices"][0]["message"]["content"]
-        raise Exception(f"HTTP {response.status_code}: {response.text}")
+        except Exception:
+            raise Exception(f"Gecersiz JSON yaniti: {self._shorten_error_text(response_text)}")
+
+        content = self._extract_content_from_response(result)
+        if content is not None:
+            return content
+
+        error_text = self._extract_error_from_response(result)
+        if error_text:
+            raise Exception(error_text)
+
+        raise Exception(
+            "Model gecerli bir chat yaniti donmedi. "
+            f"Gelen alanlar: {', '.join(sorted(result.keys())) or 'yok'}"
+        )
+
+    def _extract_content_from_response(self, result):
+        try:
+            choices = result.get("choices")
+            if isinstance(choices, list) and choices:
+                first_choice = choices[0] or {}
+                message = first_choice.get("message")
+                if isinstance(message, dict):
+                    content = message.get("content")
+                    if isinstance(content, str) and content.strip():
+                        return content
+                text = first_choice.get("text")
+                if isinstance(text, str) and text.strip():
+                    return text
+        except Exception:
+            pass
+
+        # Bazi servisler fallback olarak dogrudan text/content donebiliyor.
+        direct_content = result.get("content")
+        if isinstance(direct_content, str) and direct_content.strip():
+            return direct_content
+
+        direct_text = result.get("text")
+        if isinstance(direct_text, str) and direct_text.strip():
+            return direct_text
+
+        return None
+
+    def _extract_error_from_response(self, result):
+        candidates = [
+            result.get("error"),
+            result.get("message"),
+            result.get("detail"),
+        ]
+
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate.strip():
+                return self._shorten_error_text(candidate)
+            if isinstance(candidate, dict):
+                nested = candidate.get("message") or candidate.get("detail") or candidate.get("error")
+                if isinstance(nested, str) and nested.strip():
+                    return self._shorten_error_text(nested)
+
+        return None
+
+    def _shorten_error_text(self, text, limit=500):
+        compact = " ".join((text or "").split())
+        if len(compact) <= limit:
+            return compact
+        return compact[:limit] + "..."
 
     def _parse_and_emit(self, content, cfg):
         title = cfg["default_title"]
