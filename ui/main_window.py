@@ -1388,8 +1388,16 @@ class MainWindow(QMainWindow):
                 self.speaker_combo.addItem(name, spk["index"])
                 seen_speakers.add(name)
         self.speaker_combo.blockSignals(False)
+        self._sync_capture_control_states()
 
     # ─── FLM ─────────────────────────────────────────────────────────────────
+
+    def _sync_capture_control_states(self):
+        can_edit_inputs = self.record_group.isEnabled() and not self.audio_manager.is_recording
+        self.mic_combo.setEnabled(can_edit_inputs)
+        self.speaker_combo.setEnabled(can_edit_inputs)
+        self.mode_combo.setEnabled(can_edit_inputs)
+        self.btn_refresh_mics.setEnabled(can_edit_inputs)
 
     def get_selected_flm_model(self):
         model_name = self.flm_model_input.text().strip()
@@ -1420,10 +1428,11 @@ class MainWindow(QMainWindow):
             self.btn_start_flm.setStyleSheet("background-color: #F38BA8; color: #11111B;")
             self.record_group.setEnabled(True)
             self.flm_model_input.setEnabled(False)
+            self.populate_mics()
             self.statusBar_widget.showMessage(f"FLM: {message}")
         else:
             loading_words = ["Başlatılıyor", "Loading", "Configuring", "Starting", "Modeller"]
-            if any(w in message for w in loading_words):
+            if any(w in message for w in loading_words) or "Baslatiliyor" in message or "yukleniyor" in message:
                 self.status_indicator.setText(f"🟡 {message[:45]}...")
                 self.status_indicator.setStyleSheet("color: #F9E2AF; font-weight: bold; font-size: 14px;")
             else:
@@ -1434,6 +1443,7 @@ class MainWindow(QMainWindow):
                 self.record_group.setEnabled(False)
                 self.flm_model_input.setEnabled(True)
             self.statusBar_widget.showMessage(f"FLM: {message}")
+        self._sync_capture_control_states()
 
     # ─── Kayıt ───────────────────────────────────────────────────────────────
 
@@ -1456,10 +1466,12 @@ class MainWindow(QMainWindow):
             self.mode_combo.setEnabled(False)
             self.mic_combo.setEnabled(False)
             self.btn_finish_meeting.setEnabled(True)
+            self._sync_capture_control_states()
         else:
             self.audio_manager.stop_recording()
             self.btn_start_record.setText(self.t("btn_resume_rec"))
             self.btn_start_record.setStyleSheet("background-color: #89B4FA; color: #11111B;")
+            self._sync_capture_control_states()
             self.subtitle_box.append("<i>[Kayıt Duraklatıldı]</i>")
 
     def finish_meeting(self):
@@ -1469,6 +1481,7 @@ class MainWindow(QMainWindow):
         self.mode_combo.setEnabled(True)
         self.mic_combo.setEnabled(True)
         self.btn_finish_meeting.setEnabled(False)
+        self._sync_capture_control_states()
 
         self.meeting_active = False
         self._finishing = True  # LLM analizini beklemeye al
