@@ -51,7 +51,7 @@ class AsrClientThread(QThread):
             return True
 
         for hallucination in self.HALLUCINATIONS:
-            if normalized == hallucination.casefold():
+            if normalized == self._normalize_text(hallucination):
                 return True
 
         return False

@@ -1454,6 +1454,8 @@ class MainWindow(QMainWindow):
             # Eğer uygulama 'yeni toplantı' modundaysa (yani BİTİR butonu kapalıysa) ekranı temizle
             if not self.btn_finish_meeting.isEnabled():
                 self.full_transcript_buffer = ""
+                self._last_transcript_text = None
+                self._last_transcript_source = None
                 self.subtitle_box.clear()
                 self.subtitle_box.append(self.t("rec_started"))
             else:
@@ -1588,7 +1590,23 @@ class MainWindow(QMainWindow):
         if getattr(self, '_finishing', False):
             self._check_asr_and_start_llm()
 
+    def _should_ignore_transcript_line(self, text, source_label):
+        normalized = " ".join(text.strip().lower().split())
+        if not normalized:
+            return True
+
+        last_text = getattr(self, "_last_transcript_text", None)
+        last_source = getattr(self, "_last_transcript_source", None)
+        if last_source == source_label and last_text == normalized:
+            return True
+
+        self._last_transcript_text = normalized
+        self._last_transcript_source = source_label
+        return False
+
     def append_subtitle(self, text, source_label):
+        if self._should_ignore_transcript_line(text, source_label):
+            return
         self.full_transcript_buffer += f"[{source_label}]: {text}\n"
         color = "#89DCEB" if source_label == "BEN" else "#F9E2AF"
         formatted = f'<span style="color: {color};"><b>[{source_label}]</b></span>: {text}<br>'

@@ -18,6 +18,7 @@ class AudioCaptureManager(QObject):
     VAD_LEVEL_THRESHOLD = 4
     MIC_ECHO_GATE_LEVEL = 6
     SYS_ACTIVE_LEVEL = 12
+    MIN_VOICED_FRAMES = 4
 
     def __init__(self):
         super().__init__()
@@ -225,6 +226,7 @@ class AudioCaptureManager(QObject):
         is_speaking = False
         last_speech_time = time.time()
         chunk_start_time = time.time()
+        voiced_frames = 0
 
         while self.is_recording and stream and stream.is_active():
             try:
@@ -249,6 +251,7 @@ class AudioCaptureManager(QObject):
                 level = self._calculate_level(data)
 
                 if level >= self.VAD_LEVEL_THRESHOLD:
+                    voiced_frames += 1
                     if not is_speaking:
                         is_speaking = True
                         if len(frames) == 1:
@@ -268,6 +271,7 @@ class AudioCaptureManager(QObject):
                 if not is_speaking and chunk_duration > self.IDLE_RESET_SECONDS:
                     frames.clear()
                     max_chunk_level = 0
+                    voiced_frames = 0
                     chunk_start_time = now
                     last_speech_time = now
                     continue
@@ -279,7 +283,11 @@ class AudioCaptureManager(QObject):
                     should_emit = True
 
                 if should_emit:
-                    if frames and max_chunk_level >= self.VAD_LEVEL_THRESHOLD:
+                    if (
+                        frames
+                        and max_chunk_level >= self.VAD_LEVEL_THRESHOLD
+                        and voiced_frames >= self.MIN_VOICED_FRAMES
+                    ):
                         wav_bytes = self._frames_to_wav(
                             frames,
                             channels,
@@ -289,6 +297,7 @@ class AudioCaptureManager(QObject):
                         self.chunk_ready.emit(wav_bytes, "BEN")
                     frames.clear()
                     max_chunk_level = 0
+                    voiced_frames = 0
                     is_speaking = False
                     chunk_start_time = now
                     last_speech_time = now
@@ -296,7 +305,11 @@ class AudioCaptureManager(QObject):
             except Exception:
                 time.sleep(0.1)
 
-        if frames and max_chunk_level >= self.VAD_LEVEL_THRESHOLD:
+        if (
+            frames
+            and max_chunk_level >= self.VAD_LEVEL_THRESHOLD
+            and voiced_frames >= self.MIN_VOICED_FRAMES
+        ):
             wav_bytes = self._frames_to_wav(
                 frames,
                 channels,
