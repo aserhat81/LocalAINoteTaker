@@ -571,16 +571,20 @@ class RichTextEditor(QWidget):
 # ─── History Dialog ───────────────────────────────────────────────────────────
 
 class HistoryDialog(QDialog):
-    def __init__(self, db, lang="tr", parent=None):
+    def __init__(self, db, lang="tr", parent=None, flm_manager=None):
         super().__init__(parent)
         self.db = db
         self.lang = lang
+        self.flm_manager = flm_manager
         t = I18N[lang]
         self.setWindowTitle(t["history_title"])
         self.setMinimumSize(1000, 620)
         self.current_meeting_id = None
         self.current_title = ""
         self._llm_thread = None  # Re-analyze için
+        self._pending_reanalyze_transcript = None
+        if self.flm_manager:
+            self.flm_manager.llm_service_ready.connect(self._on_reanalyze_llm_service_ready)
 
         self.setStyleSheet("""
             QDialog { background-color: #1E1E2E; color: #CDD6F4; }
@@ -829,7 +833,37 @@ class HistoryDialog(QDialog):
         self.btn_reanalyze.setText(t2["reanalyzing"])
         self.save_indicator.setText(t2["reanalyzing"])
         # LLM thread'ı başlat
-        self._llm_thread = LlmAnalyzerThread(transcript, language=self.lang)
+        self._pending_reanalyze_transcript = transcript
+        if self.flm_manager:
+            self.flm_manager.start_llm_service(self._get_selected_flm_model())
+            return
+
+        self._start_reanalyze_thread(transcript)
+
+    def _get_selected_flm_model(self):
+        parent = self.parent()
+        if parent and hasattr(parent, "get_selected_flm_model"):
+            return parent.get_selected_flm_model()
+        return LlmAnalyzerThread.MODEL_NAME
+
+    def _on_reanalyze_llm_service_ready(self, is_ready, message):
+        if self._pending_reanalyze_transcript is None:
+            return
+        if not is_ready:
+            self._pending_reanalyze_transcript = None
+            self._on_reanalyze_error(message)
+            return
+
+        transcript = self._pending_reanalyze_transcript
+        self._pending_reanalyze_transcript = None
+        self._start_reanalyze_thread(transcript)
+
+    def _start_reanalyze_thread(self, transcript):
+        self._llm_thread = LlmAnalyzerThread(
+            transcript,
+            language=self.lang,
+            model_name=self._get_selected_flm_model(),
+        )
         self._llm_thread.analysis_ready.connect(self._on_reanalyze_done)
         self._llm_thread.analysis_error.connect(self._on_reanalyze_error)
         self._llm_thread.analysis_progress.connect(self._on_reanalyze_progress)
@@ -859,6 +893,8 @@ class HistoryDialog(QDialog):
         self.btn_reanalyze.setEnabled(True)
         self.btn_save.setEnabled(True)
         self.load_meetings()
+        if self.flm_manager:
+            self.flm_manager.restart_asr_service()
 
     def _on_reanalyze_error(self, err_msg):
         t2 = I18N[self.lang]
@@ -868,6 +904,8 @@ class HistoryDialog(QDialog):
         self.btn_reanalyze.setEnabled(True)
         self.btn_save.setEnabled(True)
         self.load_meetings()
+        if self.flm_manager:
+            self.flm_manager.restart_asr_service()
 
     def send_current_email(self):
         t = I18N[self.lang]
@@ -908,6 +946,7 @@ class MainWindow(QMainWindow):
         # Managers
         self.flm_manager = FlmManager()
         self.flm_manager.flm_status_changed.connect(self.on_flm_status_changed)
+        self.flm_manager.llm_service_ready.connect(self.on_llm_service_ready)
         self.audio_manager = AudioCaptureManager()
         self.audio_manager.chunk_ready.connect(self.on_audio_chunk_ready)
         self.db = DatabaseManager()
@@ -921,6 +960,7 @@ class MainWindow(QMainWindow):
         self.asr_queue = []     # İşlem sırası kuyruğu
         self.meeting_active = False  # True iken ses paketleri işlenir
         self.llm_thread = None
+        self._pending_live_analysis = False
         self.full_transcript_buffer = ""
         self.notified_meetings = set() # Zaten bildirim yapılan toplantılar
 
@@ -1183,7 +1223,7 @@ class MainWindow(QMainWindow):
             self.status_indicator.setText("🟢 " + ("Çalışıyor" if self._lang == "tr" else "Running"))
             self.btn_start_flm.setText(t["btn_stop_flm"])
             if hasattr(self, 'flm_model_input'):
-                self.flm_model_input.setEnabled(False)
+                self.flm_model_input.setEnabled(self.flm_manager.service_mode != "llm")
         else:
             self.status_indicator.setText(t["status_off"])
             self.btn_start_flm.setText(t["btn_start_flm"])
@@ -1427,7 +1467,7 @@ class MainWindow(QMainWindow):
             self.btn_start_flm.setText(self.t("btn_stop_flm"))
             self.btn_start_flm.setStyleSheet("background-color: #F38BA8; color: #11111B;")
             self.record_group.setEnabled(True)
-            self.flm_model_input.setEnabled(False)
+            self.flm_model_input.setEnabled(self.flm_manager.service_mode != "llm")
             self.populate_mics()
             self.statusBar_widget.showMessage(f"FLM: {message}")
         else:
@@ -1503,16 +1543,34 @@ class MainWindow(QMainWindow):
             # Kuyruk bitti, LLM'i başlat!
             self._finishing = False
             color_warn = "#F9E2AF"
-            analyzing_msg = self.t('analyzing').format(model=LlmAnalyzerThread.MODEL_NAME)
+            analyzing_msg = self.t('analyzing').format(model=self.get_selected_flm_model())
             self.subtitle_box.append(f"<br><span style='color: {color_warn};'><b>{analyzing_msg}</b></span><br>")
             self.statusBar_widget.showMessage(self.t("analyzing_status"))
 
-            lang = "tr" if self.lang_combo.currentIndex() == 0 else "en"
-            self.llm_thread = LlmAnalyzerThread(self.full_transcript_buffer, language=lang)
-            self.llm_thread.analysis_ready.connect(self.on_analysis_completed)
-            self.llm_thread.analysis_error.connect(self.on_analysis_error)
-            self.llm_thread.analysis_progress.connect(self.on_analysis_progress)
-            self.llm_thread.start()
+            self._pending_live_analysis = True
+            self.flm_model_input.setEnabled(False)
+            self.record_group.setEnabled(False)
+            self.flm_manager.start_llm_service(self.get_selected_flm_model())
+
+    def on_llm_service_ready(self, is_ready, message):
+        if not self._pending_live_analysis:
+            return
+        if not is_ready:
+            self._pending_live_analysis = False
+            self.on_analysis_error(message)
+            return
+
+        self._pending_live_analysis = False
+        lang = "tr" if self.lang_combo.currentIndex() == 0 else "en"
+        self.llm_thread = LlmAnalyzerThread(
+            self.full_transcript_buffer,
+            language=lang,
+            model_name=self.get_selected_flm_model(),
+        )
+        self.llm_thread.analysis_ready.connect(self.on_analysis_completed)
+        self.llm_thread.analysis_error.connect(self.on_analysis_error)
+        self.llm_thread.analysis_progress.connect(self.on_analysis_progress)
+        self.llm_thread.start()
 
     def on_analysis_progress(self, message):
         self.statusBar_widget.showMessage(message)
@@ -1536,6 +1594,7 @@ class MainWindow(QMainWindow):
             import winsound
             winsound.MessageBeep(winsound.MB_ICONASTERISK)
         except Exception: pass
+        self.flm_manager.restart_asr_service()
 
     def on_analysis_error(self, err_msg):
         self.statusBar_widget.showMessage(err_msg)
@@ -1546,6 +1605,7 @@ class MainWindow(QMainWindow):
         fallback_summary = f"Analiz Hatası: {err_msg}" if self._lang == "tr" else f"Analysis Error: {err_msg}"
         self.db.save_meeting(fallback_title, self.full_transcript_buffer, fallback_summary, participants="")
         self.statusBar_widget.showMessage(self.t("saved_status"))
+        self.flm_manager.restart_asr_service()
 
     # ─── ASR ─────────────────────────────────────────────────────────────────
 
@@ -1665,4 +1725,4 @@ class MainWindow(QMainWindow):
         msg.exec()
 
     def open_history(self):
-        HistoryDialog(self.db, lang=self._lang, parent=self).exec()
+        HistoryDialog(self.db, lang=self._lang, parent=self, flm_manager=self.flm_manager).exec()

@@ -272,11 +272,12 @@ class LlmAnalyzerThread(QThread):
         },
     }
 
-    def __init__(self, transcript, language="tr"):
+    def __init__(self, transcript, language="tr", model_name=None):
         super().__init__()
         self.language = language if language in self.LANG_CONFIG else "tr"
         self.transcript = self._normalize_transcript(transcript)
         self.api_url = "http://127.0.0.1:52625/v1/chat/completions"
+        self.model_name = (model_name or self.MODEL_NAME).strip() or self.MODEL_NAME
 
     def run(self):
         cfg = self.LANG_CONFIG[self.language]
@@ -385,7 +386,7 @@ class LlmAnalyzerThread(QThread):
 
     def _call_llm(self, system_prompt, user_prompt, max_tokens):
         data = {
-            "model": self.MODEL_NAME,
+            "model": self.model_name,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
