@@ -1,86 +1,178 @@
 # Local AI Suite
-### Powered by AMD NPU · FastFlowLM · Whisper · Qwen3:9B
+
+### Local AI Note Taker + Shorts Studio
+
+#### FastFlowLM · Standard Whisper · Ollama · LM Studio
 
 🌍 **[Türkçe versiyon için aşağı kaydırın](#-türkçe)**
 
-Record, transcribe, and auto-summarize your meetings using **local artificial intelligence**. The entire process runs on your NPU, requiring no internet connection.
+Local AI Suite is a Windows desktop application for recording meetings, transcribing speech, summarizing notes, and creating short-form video workflows with local AI tools.
+
+The app was originally designed around **AMD NPU + FastFlowLM**, but it now also supports standard local alternatives. AMD NPU users get **FastFlowLM as the default experience**, while users without AMD NPU can still use **Standard Whisper**, **Ollama**, or **LM Studio** depending on their hardware and preference.
 
 ---
 
-## ⚡ Installation (One-Click)
+## ⚡ Installation
 
-### Prerequisites
-| Requirement | Status |
-|---|---|
-| Windows 10/11 | ✅ Required |
-| AMD Ryzen AI / NPU supported processor | ✅ Required |
-| [Python 3.11+](https://www.python.org/downloads/) | ✅ Required |
-| [FastFlowLM](https://github.com/FastFlowLM/FastFlowLM/releases/latest/download/flm-setup.exe) | Default for AMD NPU systems; setup can offer alternatives |
-| faster-whisper | Installed automatically for Standard Whisper transcription |
-| Ollama / LM Studio | Optional local LLM providers; setup can offer installation |
+### Requirements
 
-### Setup Steps
-
-```
-1. Download or clone this repo
-   git clone https://github.com/yourusername/local-ai-note-taker
-
-2. Double click the setup.bat file
-   → Python dependencies are installed automatically
-   → AMD NPU check is performed
-   → Offers to download FastFlowLM if missing
-   → Desktop shortcut is created
-```
-
-### Start the Application
-- Double click the **"Local AI Suite"** shortcut on your desktop  
-- or double click the `run.bat` file  
-- or in the terminal: `python main.py`
+| Requirement        | Status                                       |
+| ------------------ | -------------------------------------------- |
+| Windows 10/11      | Required                                     |
+| Python 3.11+       | Required                                     |
+| AMD Ryzen AI / NPU | Optional, recommended for FastFlowLM         |
+| FastFlowLM         | Default provider on AMD NPU systems          |
+| faster-whisper     | Installed automatically for Standard Whisper |
+| Ollama             | Optional local LLM provider                  |
+| LM Studio          | Optional local LLM provider                  |
+| FFmpeg / yt-dlp    | Used by Shorts Studio workflows              |
 
 ---
 
-## 🎯 Features
+## 🚀 Setup
 
-| Feature | Description |
-|---|---|
-| 🎤 **System + Microphone Recording** | Audio from both sources for online meetings |
-| 🎙️ **Microphone Only** | For physical meetings and dictation |
-| 📝 **Real-Time Subtitles** | NPU-powered instant transcription via Whisper |
-| 🤖 **AI Analysis** | Automatic title, summary, and participant detection via Gemma3 |
-| 📂 **Meeting Archive** | All meetings are stored in a local database |
-| 📧 **Send Email** | Share meeting notes via email with a single click |
-| 🔒 **100% Local** | Your data is never sent to the cloud |
+```bash
+git clone https://github.com/aserhat81/LocalAINoteTaker.git
+cd LocalAINoteTaker
+setup.bat
+```
+
+The setup process:
+
+* Installs Python dependencies from `requirements.txt`
+* Checks AMD NPU availability
+* Checks FastFlowLM availability
+* Keeps FastFlowLM as default when AMD NPU is available
+* Does not block installation if AMD NPU is missing
+* Installs `faster-whisper` for Standard Whisper transcription
+* Offers optional Ollama / LM Studio setup depending on detected hardware
+* Creates a desktop shortcut named **Local AI Suite**
+
+---
+
+## ▶️ Start the Application
+
+You can start the app in one of three ways:
+
+```bash
+python main.py
+```
+
+or double-click:
+
+```text
+run.bat
+```
+
+or use the desktop shortcut:
+
+```text
+Local AI Suite
+```
+
+---
+
+## 🎯 Main Features
+
+| Feature                          | Description                                                                        |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| 🎤 System + Microphone Recording | Capture both system audio and microphone audio for online meetings                 |
+| 🎙️ Microphone Only Mode         | Record physical meetings, dictation, or voice notes                                |
+| 📝 Live Transcription            | Use FastFlowLM ASR or Standard Whisper                                             |
+| 🤖 AI Meeting Analysis           | Generate titles, summaries, action items, and participant notes                    |
+| 🧠 Multiple Local LLM Providers  | FastFlowLM, Ollama, and LM Studio support                                          |
+| 📂 Local Meeting Archive         | Store meeting records in a local SQLite database                                   |
+| 📧 Email Sharing                 | Send meeting notes via email                                                       |
+| 🎬 Shorts Studio                 | Download, transcribe, and process video content for short-form workflows           |
+| 🔒 Local-First Design            | Meeting data stays on your computer unless you explicitly configure external tools |
+
+---
+
+## 🧠 AI Provider Options
+
+Local AI Suite separates **transcription provider** and **summary / analysis provider**.
+
+### Transcription Providers
+
+| Provider         | Best For                   | Notes                                           |
+| ---------------- | -------------------------- | ----------------------------------------------- |
+| FastFlowLM ASR   | AMD Ryzen AI / NPU systems | Default when AMD NPU and FLM are available      |
+| Standard Whisper | Any compatible Windows PC  | Uses `faster-whisper`; does not require AMD NPU |
+
+### Summary / LLM Providers
+
+| Provider   | Best For                           | Notes                                         |
+| ---------- | ---------------------------------- | --------------------------------------------- |
+| FastFlowLM | AMD NPU systems                    | Default provider on supported AMD NPU devices |
+| Ollama     | NVIDIA GPU / general local LLM use | Optional; setup can offer installation        |
+| LM Studio  | AMD GPU / general local LLM use    | Optional; setup can offer installation        |
+
+---
+
+## 🖥️ Hardware Behavior
+
+### AMD NPU Available
+
+If AMD NPU and FastFlowLM are detected:
+
+* FastFlowLM is selected by default
+* FLM ASR can be used for live transcription
+* FLM LLM can be used for meeting analysis
+* Ollama and LM Studio can still be selected manually
+
+### No AMD NPU
+
+If AMD NPU is not detected:
+
+* The app still opens
+* FastFlowLM is not forced
+* Standard Whisper can be used for transcription
+* Ollama or LM Studio can be used for summarization
+* Setup may suggest optional provider installation
 
 ---
 
 ## 🏗️ Architecture
 
-```
+```text
 main.py
 ├── ui/
-│   ├── splash.py        → Welcome screen (NPU & FLM check)
-│   └── main_window.py   → Main UI
+│   ├── splash.py                 → Startup screen and environment checks
+│   └── main_window.py            → Main application UI
 ├── core/
-│   ├── hw_check.py      → AMD NPU detection
-│   ├── flm_manager.py   → FastFlowLM service management
-│   ├── audio_capture.py → System + Mic audio capture
-│   ├── asr_client.py    → Whisper ASR API client
-│   └── llm_analyzer.py  → Gemma3 LLM analysis client
+│   ├── hw_check.py               → Hardware and provider detection
+│   ├── flm_manager.py            → FastFlowLM service management
+│   ├── audio_capture.py          → System and microphone audio capture
+│   ├── asr_client.py             → FastFlowLM ASR / Standard Whisper transcription
+│   ├── llm_analyzer.py           → FLM / Ollama / LM Studio analysis provider
+│   ├── model_session_manager.py  → Model/session handling
+│   └── shorts_pipeline.py        → Shorts Studio processing pipeline
+├── modules/
+│   ├── shorts_studio.py          → Shorts Studio UI/module
+│   └── youtube_downloader.py     → Video download helper
+├── services/
+│   └── chatgpt_browser_bridge.py → Browser automation bridge
 ├── database/
-│   └── db_manager.py    → SQLite meeting database
-└── utils/
-    └── email_sender.py  → Email dispatch helper
+│   └── db_manager.py             → SQLite local database
+├── utils/
+│   └── email_sender.py           → Email sending helper
+└── assets/
+    └── icon.ico / icon.png       → Application icons
 ```
 
 ---
 
 ## 🔧 Manual Usage
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
+Install dependencies manually:
 
-# Start the application
+```bash
+pip install -r requirements.txt
+```
+
+Run the app:
+
+```bash
 python main.py
 ```
 
@@ -88,106 +180,231 @@ python main.py
 
 ## ❓ Frequently Asked Questions
 
-**FLM service doesn't start?**  
-→ Test `flm serve gemma3:4b --asr 1` command in the terminal. If it works, the app will auto-detect it.
+### Is AMD NPU required?
 
-**Model loading takes too long?**  
-→ Whisper (~30s) + Gemma3 (~90s) is expected on the VERY first load. It will be much faster afterwards.
+No. AMD NPU is recommended for the FastFlowLM experience, but it is no longer mandatory. Users without AMD NPU can use Standard Whisper for transcription and Ollama or LM Studio for LLM analysis.
 
-**No AMD NPU found?**  
-→ Requires the Ryzen AI series (7000+, 8000+, 9000+ series). Unsupported processors: AMD Ryzen 5000 and older.
+### What is the default setup?
+
+On AMD NPU systems, FastFlowLM is the default provider.
+
+### Can I use Standard Whisper instead of FastFlowLM?
+
+Yes. In the Note Taker section, you can select Standard Whisper as the live transcription provider.
+
+### Can I use Ollama or LM Studio?
+
+Yes. Ollama and LM Studio are available as optional local LLM providers for summarization and analysis.
+
+### Does the app install everything automatically?
+
+Python dependencies and faster-whisper are handled through setup. Ollama and LM Studio are optional; the app/setup can suggest installation and ask for confirmation.
+
+### FLM service does not start. What should I check?
+
+Try running FastFlowLM manually from the terminal and confirm that the FLM command is available. If FLM is missing or AMD NPU is not available, switch transcription to Standard Whisper and LLM provider to Ollama or LM Studio.
+
+### Model loading takes too long. Is this normal?
+
+Yes. The first model load can take longer depending on your hardware and provider. Later runs are usually faster.
 
 ---
 
-**Attention:** This application was developed specifically featuring hardware acceleration via the **AMD NPU** (Neural Processing Unit).
+## ⚠️ Notes
 
-*Made with ❤️ by Serhat | Powered by AMD NPU, FastFlowLM, Whisper, Gemma3*
-<br>
-📺 **Developer YouTube Channel:** [Teknoloji ve Hayat](https://www.youtube.com/@TeknolojiHayat)
+* Meeting data is stored locally.
+* Do not commit local outputs, browser profiles, downloaded videos, models, or logs to Git.
+* Provider availability depends on your local machine setup.
+* Ollama and LM Studio model performance depends heavily on CPU/GPU/RAM.
 
+---
+
+## ❤️ Credits
+
+Made with ❤️ by Serhat
+
+📺 **Developer YouTube Channel:**
+[Teknoloji ve Hayat](https://www.youtube.com/@TeknolojiHayat)
+
+---
 
 <br><br><br>
 
 # 🇹🇷 Türkçe
 
-Toplantılarınızı **yerel yapay zeka** ile kaydedin, metne dönüştürün ve otomatik özetleyin. Tüm işlem NPU üzerinde, internet bağlantısı gerekmez.
+# Local AI Suite
+
+### Local AI Note Taker + Shorts Studio
+
+#### FastFlowLM · Standart Whisper · Ollama · LM Studio
+
+Local AI Suite; toplantı kaydetme, konuşmayı metne dönüştürme, toplantı notlarını özetleme ve kısa video üretim akışlarını yerel yapay zeka araçlarıyla yönetmek için geliştirilmiş Windows masaüstü uygulamasıdır.
+
+Uygulama ilk olarak **AMD NPU + FastFlowLM** odaklı geliştirilmiştir. Ancak artık AMD NPU zorunlu değildir. AMD NPU olan sistemlerde **FastFlowLM varsayılan** olarak gelir. AMD NPU olmayan kullanıcılar ise **Standart Whisper**, **Ollama** veya **LM Studio** seçenekleriyle uygulamayı kullanabilir.
 
 ---
 
-## ⚡ Kurulum (tek tıkla)
+## ⚡ Kurulum
 
-### Ön gereksinimler
-| Gereksinim | Durum |
-|---|---|
-| Windows 10/11 | ✅ Zorunlu |
-| AMD Ryzen AI / NPU destekli işlemci | ✅ Zorunlu |
-| [Python 3.11+](https://www.python.org/downloads/) | ✅ Zorunlu |
-| [FastFlowLM](https://github.com/FastFlowLM/FastFlowLM/releases/latest/download/flm-setup.exe) | AMD NPU sistemlerde varsayılan; setup alternatifleri de sunabilir |
-| faster-whisper | Standart Whisper transkripsiyonu için otomatik kurulur |
-| Ollama / LM Studio | Opsiyonel yerel LLM sağlayıcıları; setup kurulum önerebilir |
+### Gereksinimler
 
-### Kurulum adımları
-
-```
-1. Bu repoyu indirin veya klonlayın
-   git clone https://github.com/kullaniciadiniz/local-ai-note-taker
-
-2. setup.bat dosyasına çift tıklayın
-   → Python bağımlılıkları otomatik yüklenir
-   → AMD NPU kontrolü yapılır
-   → FastFlowLM yoksa indirme teklif edilir
-   → Masaüstü kısayolu oluşturulur
-```
-
-### Uygulamayı başlat
-- Masaüstündeki **"Local AI Suite"** kısayoluna çift tıkla  
-- veya `run.bat` dosyasına çift tıkla  
-- veya terminalde: `python main.py`
+| Gereksinim         | Durum                                    |
+| ------------------ | ---------------------------------------- |
+| Windows 10/11      | Zorunlu                                  |
+| Python 3.11+       | Zorunlu                                  |
+| AMD Ryzen AI / NPU | Opsiyonel, FastFlowLM için önerilir      |
+| FastFlowLM         | AMD NPU sistemlerde varsayılan sağlayıcı |
+| faster-whisper     | Standart Whisper için otomatik kurulur   |
+| Ollama             | Opsiyonel yerel LLM sağlayıcı            |
+| LM Studio          | Opsiyonel yerel LLM sağlayıcı            |
+| FFmpeg / yt-dlp    | Shorts Studio akışlarında kullanılır     |
 
 ---
 
-## 🎯 Özellikler
+## 🚀 Kurulum Adımları
 
-| Özellik | Açıklama |
-|---|---|
-| 🎤 **Sistem + Mikrofon Kaydı** | Online toplantılar için her iki kaynaktan ses |
-| 🎙️ **Sadece Mikrofon** | Fiziksel toplantılar ve dikte için |
-| 📝 **Gerçek Zamanlı Altyazı** | Whisper ile NPU destekli anlık transkripsiyon |
-| 🤖 **AI Analiz** | Gemma3 ile otomatik başlık, özet ve katılımcı tespiti |
-| 📂 **Toplantı Arşivi** | Tüm toplantılar yerel veritabanında saklanır |
-| 📧 **E-Posta Gönderimi** | Toplantı notlarını tek tıkla e-posta ile paylaş |
-| 🔒 **%100 Yerel** | Verileriniz asla buluta gönderilmez |
+```bash
+git clone https://github.com/aserhat81/LocalAINoteTaker.git
+cd LocalAINoteTaker
+setup.bat
+```
+
+Kurulum sırasında:
+
+* `requirements.txt` içindeki Python bağımlılıkları kurulur
+* AMD NPU kontrolü yapılır
+* FastFlowLM kontrolü yapılır
+* AMD NPU ve FLM varsa FastFlowLM varsayılan kalır
+* AMD NPU yoksa kurulum durdurulmaz
+* Standart Whisper için `faster-whisper` kurulur
+* Donanıma göre Ollama / LM Studio kurulumu önerilebilir
+* Masaüstüne **Local AI Suite** kısayolu oluşturulur
+
+---
+
+## ▶️ Uygulamayı Başlatma
+
+Uygulamayı şu yollardan biriyle başlatabilirsiniz:
+
+```bash
+python main.py
+```
+
+veya:
+
+```text
+run.bat
+```
+
+veya masaüstündeki kısayol:
+
+```text
+Local AI Suite
+```
+
+---
+
+## 🎯 Ana Özellikler
+
+| Özellik                      | Açıklama                                                           |
+| ---------------------------- | ------------------------------------------------------------------ |
+| 🎤 Sistem + Mikrofon Kaydı   | Online toplantılar için sistem sesi ve mikrofonu birlikte kaydeder |
+| 🎙️ Sadece Mikrofon Modu     | Fiziksel toplantılar, dikte ve sesli notlar için                   |
+| 📝 Canlı Transkripsiyon      | FastFlowLM ASR veya Standart Whisper seçilebilir                   |
+| 🤖 AI Toplantı Analizi       | Başlık, özet, aksiyon maddeleri ve katılımcı notları üretir        |
+| 🧠 Çoklu Yerel LLM Sağlayıcı | FastFlowLM, Ollama ve LM Studio desteği                            |
+| 📂 Yerel Toplantı Arşivi     | Toplantılar yerel SQLite veritabanında saklanır                    |
+| 📧 E-Posta Paylaşımı         | Toplantı notlarını e-posta ile paylaşma                            |
+| 🎬 Shorts Studio             | Video indirme, transkript çıkarma ve kısa video üretim akışı       |
+| 🔒 Yerel Öncelikli Tasarım   | Verileriniz varsayılan olarak bilgisayarınızda kalır               |
+
+---
+
+## 🧠 AI Sağlayıcı Seçenekleri
+
+Local AI Suite içinde **transkripsiyon sağlayıcısı** ve **özetleme / analiz sağlayıcısı** ayrı seçilebilir.
+
+### Transkripsiyon Sağlayıcıları
+
+| Sağlayıcı        | En Uygun Kullanım              | Not                                            |
+| ---------------- | ------------------------------ | ---------------------------------------------- |
+| FastFlowLM ASR   | AMD Ryzen AI / NPU sistemler   | AMD NPU ve FLM varsa varsayılan gelir          |
+| Standart Whisper | Uyumlu herhangi bir Windows PC | `faster-whisper` kullanır, AMD NPU gerektirmez |
+
+### Özetleme / LLM Sağlayıcıları
+
+| Sağlayıcı  | En Uygun Kullanım                      | Not                                    |
+| ---------- | -------------------------------------- | -------------------------------------- |
+| FastFlowLM | AMD NPU sistemler                      | Destekli AMD NPU cihazlarda varsayılan |
+| Ollama     | NVIDIA GPU / genel yerel LLM kullanımı | Opsiyonel; kurulum önerilebilir        |
+| LM Studio  | AMD GPU / genel yerel LLM kullanımı    | Opsiyonel; kurulum önerilebilir        |
+
+---
+
+## 🖥️ Donanıma Göre Davranış
+
+### AMD NPU Varsa
+
+AMD NPU ve FastFlowLM algılanırsa:
+
+* FastFlowLM varsayılan olarak seçilir
+* Canlı transkripsiyon için FLM ASR kullanılabilir
+* Toplantı analizi için FLM LLM kullanılabilir
+* İstenirse Ollama veya LM Studio da seçilebilir
+
+### AMD NPU Yoksa
+
+AMD NPU algılanmazsa:
+
+* Uygulama yine açılır
+* FastFlowLM zorunlu tutulmaz
+* Transkripsiyon için Standart Whisper kullanılabilir
+* Özetleme için Ollama veya LM Studio kullanılabilir
+* Kurulum sırasında opsiyonel sağlayıcılar önerilebilir
 
 ---
 
 ## 🏗️ Mimari
 
-```
+```text
 main.py
 ├── ui/
-│   ├── splash.py        → Başlangıç ekranı (NPU & FLM kontrolü)
-│   └── main_window.py   → Ana arayüz
+│   ├── splash.py                 → Başlangıç ekranı ve ortam kontrolleri
+│   └── main_window.py            → Ana uygulama arayüzü
 ├── core/
-│   ├── hw_check.py      → AMD NPU tespiti
-│   ├── flm_manager.py   → FastFlowLM servis yönetimi
-│   ├── audio_capture.py → Sistem + Mikrofon ses yakalama
-│   ├── asr_client.py    → Whisper ASR API istemcisi
-│   └── llm_analyzer.py  → Gemma3 LLM analiz istemcisi
+│   ├── hw_check.py               → Donanım ve sağlayıcı kontrolü
+│   ├── flm_manager.py            → FastFlowLM servis yönetimi
+│   ├── audio_capture.py          → Sistem ve mikrofon ses yakalama
+│   ├── asr_client.py             → FastFlowLM ASR / Standart Whisper transkripsiyon
+│   ├── llm_analyzer.py           → FLM / Ollama / LM Studio analiz sağlayıcısı
+│   ├── model_session_manager.py  → Model ve oturum yönetimi
+│   └── shorts_pipeline.py        → Shorts Studio işlem akışı
+├── modules/
+│   ├── shorts_studio.py          → Shorts Studio modülü
+│   └── youtube_downloader.py     → Video indirme yardımcısı
+├── services/
+│   └── chatgpt_browser_bridge.py → Tarayıcı otomasyon köprüsü
 ├── database/
-│   └── db_manager.py    → SQLite toplantı veritabanı
-└── utils/
-    └── email_sender.py  → E-posta gönderim yardımcısı
+│   └── db_manager.py             → SQLite yerel veritabanı
+├── utils/
+│   └── email_sender.py           → E-posta gönderim yardımcısı
+└── assets/
+    └── icon.ico / icon.png       → Uygulama ikonları
 ```
 
 ---
 
-## 🔧 Manuel kullanım
+## 🔧 Manuel Kullanım
+
+Bağımlılıkları manuel kurmak için:
 
 ```bash
-# Bağımlılıkları kur
 pip install -r requirements.txt
+```
 
-# Uygulamayı başlat
+Uygulamayı başlatmak için:
+
+```bash
 python main.py
 ```
 
@@ -195,19 +412,48 @@ python main.py
 
 ## ❓ Sık Sorulan Sorular
 
-**FLM servisi başlamıyor?**  
-→ `flm serve gemma3:4b --asr 1` komutunu terminalden test edin. Çalışıyorsa uygulama otomatik algılar.
+### AMD NPU zorunlu mu?
 
-**Model yüklemesi uzun sürüyor?**  
-→ Whisper (~30sn) + Gemma3 (~90sn) ilk yüklemede beklenebilir. Bir kez yüklendi mi hızlanır.
+Hayır. AMD NPU, FastFlowLM deneyimi için önerilir ama artık zorunlu değildir. AMD NPU olmayan kullanıcılar transkripsiyon için Standart Whisper, özetleme için Ollama veya LM Studio kullanabilir.
 
-**AMD NPU bulunamıyor?**  
-→ Ryzen AI serisini (7000+, 8000+, 9000+ serisi) gerektirir. Desteklemez işlemci: AMD Ryzen 5000 ve öncesi.
+### Varsayılan kurulum nasıl çalışır?
+
+AMD NPU olan sistemlerde FastFlowLM varsayılan sağlayıcı olarak gelir.
+
+### FastFlowLM yerine Standart Whisper kullanabilir miyim?
+
+Evet. Note Taker bölümünde canlı transkripsiyon sağlayıcısı olarak Standart Whisper seçilebilir.
+
+### Ollama veya LM Studio kullanabilir miyim?
+
+Evet. Ollama ve LM Studio, özetleme ve analiz için opsiyonel yerel LLM sağlayıcılarıdır.
+
+### Uygulama her şeyi otomatik kuruyor mu?
+
+Python bağımlılıkları ve faster-whisper kurulum tarafından yönetilir. Ollama ve LM Studio opsiyoneldir; uygulama veya setup gerektiğinde kullanıcı onayıyla kurulum önerebilir.
+
+### FLM servisi başlamıyor. Ne yapmalıyım?
+
+FastFlowLM komutunun terminalde çalıştığını kontrol edin. FLM yoksa veya AMD NPU bulunmuyorsa transkripsiyon sağlayıcısını Standart Whisper, LLM sağlayıcısını ise Ollama veya LM Studio olarak değiştirebilirsiniz.
+
+### Model yükleme uzun sürüyor. Normal mi?
+
+Evet. İlk model yüklemesi donanımınıza ve seçtiğiniz sağlayıcıya göre uzun sürebilir. Sonraki kullanımlarda genellikle daha hızlı olur.
 
 ---
 
-**Dikkat:** Bu uygulama donanım ivmelendirmesi için **AMD NPU** (Neural Processing Unit) kullanılarak geliştirilmiştir.
+## ⚠️ Notlar
 
-*Made with ❤️ by Serhat | Powered by AMD NPU, FastFlowLM, Whisper, Gemma3*
-<br>
-📺 **Geliştirici YouTube Kanalı:** [Teknoloji ve Hayat](https://www.youtube.com/@TeknolojiHayat)
+* Toplantı verileri yerel olarak saklanır.
+* Yerel çıktı klasörleri, tarayıcı profilleri, indirilen videolar, modeller ve log dosyaları Git’e eklenmemelidir.
+* Sağlayıcıların çalışması yerel makine kurulumunuza bağlıdır.
+* Ollama ve LM Studio performansı CPU/GPU/RAM durumuna göre değişir.
+
+---
+
+## ❤️ Geliştirici
+
+Made with ❤️ by Serhat
+
+📺 **Geliştirici YouTube Kanalı:**
+[Teknoloji ve Hayat](https://www.youtube.com/@TeknolojiHayat)
