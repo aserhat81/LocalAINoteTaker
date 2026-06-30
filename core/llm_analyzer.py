@@ -16,9 +16,9 @@ class LlmAnalyzerThread(QThread):
     MAX_CHARS_PER_CHUNK = 14000
     MAX_MERGE_INPUT_CHARS = 24000
 
-    MAP_OUTPUT_TOKENS = 1400
-    MERGE_OUTPUT_TOKENS = 1800
-    FINAL_OUTPUT_TOKENS = 2400
+    MAP_OUTPUT_TOKENS = 1800
+    MERGE_OUTPUT_TOKENS = 2200
+    FINAL_OUTPUT_TOKENS = 3400
     API_TIMEOUT_SECONDS = 18000
 
     LANG_CONFIG = {
@@ -51,6 +51,7 @@ class LlmAnalyzerThread(QThread):
                 "- Emin degilsen 'transkriptte net degil' yaz.\n"
                 "- Bilgi hic yoksa 'belirtilmedi' yaz.\n"
                 "- Kisa ama kayipsiz ol.\n"
+                "- Detayli gorusme notlarinda konu bazli ara detaylari, gerekceleri, ornekleri ve baglami koru.\n"
                 "- Aksiyon, sorumlu, termin, tarih, risk, blokaj ve acik kalan maddeleri ozellikle ayikla.\n"
                 "- Her maddede mumkun oldugunca hangi konudan geldigi anlasilsin.\n\n"
                 "Su yapiyi kullan:\n"
@@ -62,6 +63,8 @@ class LlmAnalyzerThread(QThread):
                 "- ...\n"
                 "KISA_OZET:\n"
                 "- ...\n"
+                "DETAYLI_GORUSME_NOTLARI:\n"
+                "- Konu: ... | Detaylar: ... | Gerekce/Ornek: ... | Sonuc/Durum: ...\n"
                 "ELE_ALINAN_KONULAR:\n"
                 "- ...\n"
                 "ALINAN_KARARLAR:\n"
@@ -85,6 +88,7 @@ class LlmAnalyzerThread(QThread):
                 "Bunlari TEK bir yapiya birlestir.\n"
                 "Kurallar:\n"
                 "- Hicbir benzersiz konuyu, karari, aksiyonu, tarihi, sorumluyu, riski veya acik konuyu dusurme.\n"
+                "- Detayli gorusme notlarindaki ara gerekceleri, ornekleri, sayisal bilgileri ve konu baglamlarini koru.\n"
                 "- Tekrarlari birlestir ama bilgi kaybetme.\n"
                 "- Supheli yerlerde 'transkriptte net degil' ifadesini koru.\n"
                 "- Yeni bilgi uydurma.\n"
@@ -102,6 +106,7 @@ class LlmAnalyzerThread(QThread):
                 "## Toplantı Başlığı\n"
                 "## Toplantının Amacı\n"
                 "## Kısa Yönetici Özeti\n"
+                "## Detaylı Görüşme Notları\n"
                 "## Ele Alınan Konular\n"
                 "## Alınan Kararlar\n"
                 "## Aksiyon Maddeleri\n"
@@ -112,6 +117,7 @@ class LlmAnalyzerThread(QThread):
                 "- Transkriptte olmayan bilgi ekleme.\n"
                 "- Belirsizse 'transkriptte net degil', yoksa 'belirtilmedi' yaz.\n"
                 "- Gereksiz tekrar temizlensin.\n"
+                "- Detaylı Görüşme Notları bolumunde konu bazli ara detaylari, gerekceleri, ornekleri, sayisal bilgileri ve kimin neyi neden soyledigini kayipsiz aktar.\n"
                 "- Aksiyonlari ve sahiplerini mumkun oldugunca yakala.\n"
                 "- Tarih, saat, teslim tarihi ve yapilacaklari ozellikle ayikla.\n"
                 "- Kurumsal, profesyonel Turkce kullan.\n\n"
@@ -128,6 +134,7 @@ class LlmAnalyzerThread(QThread):
                 "## Toplantı Başlığı\n"
                 "## Toplantının Amacı\n"
                 "## Kısa Yönetici Özeti\n"
+                "## Detaylı Görüşme Notları\n"
                 "## Ele Alınan Konular\n"
                 "## Alınan Kararlar\n"
                 "## Aksiyon Maddeleri\n"
@@ -136,6 +143,7 @@ class LlmAnalyzerThread(QThread):
                 "## Açık Kalan Konular\n"
                 "## Riskler / Blokajlar\n"
                 "- Cikti kayipsiz olsun; tum benzersiz maddeleri koru.\n"
+                "- Detaylı Görüşme Notları bolumunde parcalardan gelen konu bazli detaylari, gerekceleri, ornekleri ve sayisal bilgileri ozellikle koru.\n"
                 "- Belirsizse 'transkriptte net degil', yoksa 'belirtilmedi' yaz.\n"
                 "- Tekrarlari temizle, anlami bozma.\n"
                 "- Kurumsal, profesyonel Turkce kullan.\n\n"
@@ -176,6 +184,7 @@ class LlmAnalyzerThread(QThread):
                 "- If uncertain, write 'not clear from transcript'.\n"
                 "- If absent, write 'not specified'.\n"
                 "- Keep it concise but loss-minimized.\n"
+                "- Preserve topic-level discussion details, rationale, examples, numbers, and context in Detailed Discussion Notes.\n"
                 "- Pay special attention to actions, owners, deadlines, dates, risks, blockers, and open items.\n\n"
                 "Use this structure:\n"
                 "TITLE_CANDIDATES:\n"
@@ -186,6 +195,8 @@ class LlmAnalyzerThread(QThread):
                 "- ...\n"
                 "SHORT_SUMMARY:\n"
                 "- ...\n"
+                "DETAILED_DISCUSSION_NOTES:\n"
+                "- Topic: ... | Details: ... | Rationale/Example: ... | Outcome/Status: ...\n"
                 "TOPICS_DISCUSSED:\n"
                 "- ...\n"
                 "DECISIONS_MADE:\n"
@@ -209,6 +220,7 @@ class LlmAnalyzerThread(QThread):
                 "Merge them into a single structured note set.\n"
                 "Rules:\n"
                 "- Do not drop any unique topic, decision, action, date, owner, risk, or open issue.\n"
+                "- Preserve detailed discussion notes, including rationale, examples, numbers, and context.\n"
                 "- Merge duplicates without losing detail.\n"
                 "- Preserve uncertainty labels.\n"
                 "- Do not invent new facts.\n"
@@ -226,6 +238,7 @@ class LlmAnalyzerThread(QThread):
                 "## Meeting Title\n"
                 "## Meeting Purpose\n"
                 "## Executive Summary\n"
+                "## Detailed Discussion Notes\n"
                 "## Topics Discussed\n"
                 "## Decisions Made\n"
                 "## Action Items\n"
@@ -236,6 +249,7 @@ class LlmAnalyzerThread(QThread):
                 "- Do not add unsupported information.\n"
                 "- If unclear, write 'not clear from transcript'; if absent, write 'not specified'.\n"
                 "- Remove unnecessary repetition.\n"
+                "- In Detailed Discussion Notes, keep topic-level details, rationale, examples, numbers, and who said what/why when supported by the transcript.\n"
                 "- Capture actions, owners, dates, times, and deadlines as much as possible.\n"
                 "- Use professional corporate English.\n\n"
                 "Raw Transcript:\n{transcript}"
@@ -251,6 +265,7 @@ class LlmAnalyzerThread(QThread):
                 "## Meeting Title\n"
                 "## Meeting Purpose\n"
                 "## Executive Summary\n"
+                "## Detailed Discussion Notes\n"
                 "## Topics Discussed\n"
                 "## Decisions Made\n"
                 "## Action Items\n"
@@ -259,6 +274,7 @@ class LlmAnalyzerThread(QThread):
                 "## Open Issues\n"
                 "## Risks / Blockers\n"
                 "- Keep all unique facts.\n"
+                "- In Detailed Discussion Notes, preserve detailed topic context, rationale, examples, and numbers from the structured notes.\n"
                 "- If unclear, write 'not clear from transcript'; if absent, write 'not specified'.\n"
                 "- Remove repetition without changing meaning.\n"
                 "- Use professional corporate English.\n\n"
