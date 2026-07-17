@@ -23,6 +23,7 @@ The app was originally designed around **AMD NPU + FastFlowLM**, but it now also
 | AMD Ryzen AI / NPU | Optional, recommended for FastFlowLM         |
 | FastFlowLM         | Default provider on AMD NPU systems          |
 | faster-whisper     | Installed automatically for Standard Whisper |
+| pyannote.audio     | Optional; installed when diarization is enabled |
 | Ollama             | Optional local LLM provider                  |
 | LM Studio          | Optional local LLM provider                  |
 | FFmpeg / yt-dlp    | Used by Shorts Studio workflows              |
@@ -98,6 +99,13 @@ Local AI Suite separates **transcription provider** and **summary / analysis pro
 | ---------------- | -------------------------- | ----------------------------------------------- |
 | FastFlowLM ASR   | AMD Ryzen AI / NPU systems | Default when AMD NPU and FLM are available      |
 | Standard Whisper | Any compatible Windows PC  | Uses `faster-whisper`; does not require AMD NPU |
+| Whisper v3       | Accuracy-focused local STT | Uses the explicit `large-v3` faster-whisper model |
+
+For local Whisper providers, the selected model is warmed up automatically when recording starts. After the meeting ends, all queued transcription and optional diarization work completes first; Whisper is then unloaded before the summary LLM starts, so the two large models do not remain in memory together.
+
+### Optional Speaker Diarization
+
+Enable **Separate speakers with pyannote** next to the transcription controls to replace the final live transcript with globally aligned speaker labels before summarization. In microphone-only mode every detected room speaker is separated; in online mode the local microphone remains `BEN` while remote voices are separated. First install `requirements-diarization.txt`, accept the conditions for `pyannote/speaker-diarization-community-1` on Hugging Face, and set `HF_TOKEN` (or run `hf auth login`). If diarization cannot run, the application keeps the live transcript and continues safely.
 
 ### Summary / LLM Providers
 
@@ -255,6 +263,7 @@ Uygulama ilk olarak **AMD NPU + FastFlowLM** odaklı geliştirilmiştir. Ancak a
 | AMD Ryzen AI / NPU | Opsiyonel, FastFlowLM için önerilir      |
 | FastFlowLM         | AMD NPU sistemlerde varsayılan sağlayıcı |
 | faster-whisper     | Standart Whisper için otomatik kurulur   |
+| pyannote.audio     | Opsiyonel; konuşmacı ayrımı seçilince kurulur |
 | Ollama             | Opsiyonel yerel LLM sağlayıcı            |
 | LM Studio          | Opsiyonel yerel LLM sağlayıcı            |
 | FFmpeg / yt-dlp    | Shorts Studio akışlarında kullanılır     |
@@ -330,6 +339,13 @@ Local AI Suite içinde **transkripsiyon sağlayıcısı** ve **özetleme / anali
 | ---------------- | ------------------------------ | ---------------------------------------------- |
 | FastFlowLM ASR   | AMD Ryzen AI / NPU sistemler   | AMD NPU ve FLM varsa varsayılan gelir          |
 | Standart Whisper | Uyumlu herhangi bir Windows PC | `faster-whisper` kullanır, AMD NPU gerektirmez |
+| Whisper v3       | Doğruluk odaklı yerel STT       | Açıkça `large-v3` faster-whisper modelini kullanır |
+
+Yerel Whisper sağlayıcılarında seçili model, kayıt başladığında otomatik olarak hazırlanır. Toplantı bitince kuyruktaki transkripsiyon ve varsa konuşmacı ayrımı tamamlanır; özetleme LLM'i başlamadan önce Whisper bellekten çıkarılır, böylece iki büyük model aynı anda RAM/VRAM'de tutulmaz.
+
+### Opsiyonel Konuşmacı Ayrımı
+
+Özetlemeden önce nihai transkripti toplantı genelinde tutarlı konuşmacı etiketleriyle yenilemek için transkripsiyon alanındaki **Pyannote ile konuşmacıları ayır** seçeneğini açın. Yalnız mikrofon modunda odadaki tüm konuşmacılar ayrılır; online modda yerel mikrofon `BEN` olarak korunurken uzaktaki sesler ayrılır. İlk kullanım öncesinde `requirements-diarization.txt` dosyasını kurun, Hugging Face üzerinde `pyannote/speaker-diarization-community-1` koşullarını kabul edin ve `HF_TOKEN` tanımlayın (veya `hf auth login` çalıştırın). Diarization çalışamazsa uygulama canlı transkripti koruyarak güvenli biçimde devam eder.
 
 ### Özetleme / LLM Sağlayıcıları
 

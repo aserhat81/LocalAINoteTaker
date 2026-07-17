@@ -22,7 +22,12 @@ from PySide6.QtGui import (QTextCursor, QTextCharFormat, QFont, QColor,
 
 from core.flm_manager import FlmManager
 from core.audio_capture import AudioCaptureManager
-from core.asr_client import AsrClientThread
+from core.asr_client import (
+    AsrClientThread,
+    DiarizedTranscriptionThread,
+    FasterWhisperModelCache,
+    WhisperModelLifecycleThread,
+)
 from core.llm_analyzer import LlmAnalyzerThread
 from core.model_session_manager import ModelSessionManager
 from database.db_manager import DatabaseManager
@@ -34,6 +39,44 @@ from services.chatgpt_browser_bridge import ChatGptBrowserBridge
 from core.hw_check import check_ollama_installed, check_lm_studio_installed
 from PySide6.QtWidgets import QSystemTrayIcon, QMenu
 from PySide6.QtCore import Qt, QRegularExpression, QDate, QTimer
+
+
+class ProviderInstallWorker(QThread):
+    output_received = Signal(str)
+    completed = Signal(bool, str)
+
+    def __init__(self, command, cwd, parent=None):
+        super().__init__(parent)
+        self.command = list(command)
+        self.cwd = cwd
+
+    def run(self):
+        recent_lines = []
+        try:
+            process = subprocess.Popen(
+                self.command,
+                cwd=self.cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding=locale.getpreferredencoding(False),
+                errors="replace",
+                bufsize=1,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+            if process.stdout:
+                for raw_line in process.stdout:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    recent_lines.append(line)
+                    recent_lines = recent_lines[-6:]
+                    self.output_received.emit(line)
+            return_code = process.wait()
+            detail = "\n".join(recent_lines[-3:])
+            self.completed.emit(return_code == 0, detail)
+        except Exception as exc:
+            self.completed.emit(False, str(exc))
 
 
 class ChatGptBridgeTestWorker(QThread):
@@ -88,7 +131,9 @@ I18N = {
         "asr_provider_label": "Transkripsiyon:",
         "asr_provider_flm": "FLM ASR",
         "asr_provider_faster": "Standart Whisper",
+        "asr_provider_whisper_v3": "Whisper v3 (large-v3)",
         "whisper_model_label": "Whisper modeli:",
+        "diarization_label": "Pyannote ile konuşmacıları ayır",
         "llm_provider_label": "Özetleme:",
         "llm_provider_flm": "FLM",
         "llm_provider_ollama": "Ollama",
@@ -99,10 +144,15 @@ I18N = {
         "external_llm_status": "{provider} seçili. Servisin açık olduğundan emin olun.",
         "install_provider_title": "Saglayici kurulu degil",
         "install_whisper_prompt": "Standart Whisper icin faster-whisper kurulu degil. Simdi pip ile kurulsun mu?",
+        "install_pyannote_prompt": "Konusmaci ayrimi icin pyannote.audio kurulu degil. Opsiyonel paketler simdi pip ile kurulsun mu?",
         "install_ollama_prompt": "Ollama kurulu gorunmuyor. Simdi winget ile kurulsun mu?",
         "install_lm_studio_prompt": "LM Studio kurulu gorunmuyor. Simdi winget ile kurulsun mu?",
         "install_started": "Kurulum baslatildi. Tamamlandiktan sonra uygulamayi yeniden baslatmaniz gerekebilir.",
         "install_unavailable": "Otomatik kurulum baslatilamadi. setup.bat dosyasini yeniden calistirin veya uygulamayi elle kurun.",
+        "install_running": "{provider} kuruluyor...",
+        "install_success": "✓ {provider} kurulumu tamamlandı.",
+        "install_failed": "✗ {provider} kurulumu başarısız: {detail}",
+        "install_already_running": "Başka bir sağlayıcı kurulumu halen devam ediyor.",
         "record_group": "Toplantı Kayıt ve Altyazı",
         "mic_label": "Mikrofon:",
         "speaker_label": "Hoparlör:",
@@ -117,6 +167,12 @@ I18N = {
         "subtitle_placeholder": "Altyazılar burada gerçek zamanlı olarak akacak...",
         "status_ready": "Sistem hazır. Lütfen FastFlowLM servisini başlatın.",
         "rec_started": "<b>--- Toplantı Kaydı Başladı ---</b><br>",
+        "whisper_starting": "Whisper ({model}) başlatılıyor...",
+        "whisper_ready": "Whisper ({model}) hazır. Kayıt sürüyor.",
+        "whisper_start_failed": "Whisper ({model}) başlatılamadı: {error}",
+        "whisper_stopping": "Son transkriptler tamamlandı. Whisper ({model}) durduruluyor...",
+        "whisper_stopped": "Whisper ({model}) durduruldu; RAM/VRAM serbest bırakıldı.",
+        "whisper_stop_failed": "Whisper ({model}) tamamen durdurulamadı: {error}",
         "analyzing": "--- Toplantı Bitti. {model} ile toplantı notu hazırlanıyor... ---",
         "analyzing_status": "Toplantı notları hazırlanıyor, AI çalışıyor...",
         "saved_status": "Toplantı notu veritabanına kaydedildi.",
@@ -193,7 +249,9 @@ I18N = {
         "asr_provider_label": "Transcription:",
         "asr_provider_flm": "FLM ASR",
         "asr_provider_faster": "Standard Whisper",
+        "asr_provider_whisper_v3": "Whisper v3 (large-v3)",
         "whisper_model_label": "Whisper model:",
+        "diarization_label": "Separate speakers with pyannote",
         "llm_provider_label": "Summary:",
         "llm_provider_flm": "FLM",
         "llm_provider_ollama": "Ollama",
@@ -204,10 +262,15 @@ I18N = {
         "external_llm_status": "{provider} selected. Make sure the service is running.",
         "install_provider_title": "Provider is not installed",
         "install_whisper_prompt": "faster-whisper is not installed for Standard Whisper. Install it with pip now?",
+        "install_pyannote_prompt": "pyannote.audio is not installed for speaker diarization. Install the optional packages with pip now?",
         "install_ollama_prompt": "Ollama does not appear to be installed. Install it with winget now?",
         "install_lm_studio_prompt": "LM Studio does not appear to be installed. Install it with winget now?",
         "install_started": "Installation started. You may need to restart the app after it completes.",
         "install_unavailable": "Automatic install could not be started. Run setup.bat again or install it manually.",
+        "install_running": "Installing {provider}...",
+        "install_success": "✓ {provider} installation completed.",
+        "install_failed": "✗ {provider} installation failed: {detail}",
+        "install_already_running": "Another provider installation is still running.",
         "record_group": "Meeting Recording & Subtitles",
         "mic_label": "Microphone:",
         "speaker_label": "Speaker:",
@@ -222,6 +285,12 @@ I18N = {
         "subtitle_placeholder": "Real-time subtitles will appear here...",
         "status_ready": "Ready. Please start the FastFlowLM service.",
         "rec_started": "<b>--- Meeting Recording Started ---</b><br>",
+        "whisper_starting": "Starting Whisper ({model})...",
+        "whisper_ready": "Whisper ({model}) is ready. Recording continues.",
+        "whisper_start_failed": "Whisper ({model}) could not start: {error}",
+        "whisper_stopping": "Final transcripts are complete. Stopping Whisper ({model})...",
+        "whisper_stopped": "Whisper ({model}) stopped; RAM/VRAM was released.",
+        "whisper_stop_failed": "Whisper ({model}) could not be fully stopped: {error}",
         "analyzing": "--- Meeting Ended. Preparing meeting notes with {model}... ---",
         "analyzing_status": "Preparing meeting notes, AI is working...",
         "saved_status": "Meeting notes saved to database.",
@@ -1088,6 +1157,7 @@ class MainWindow(QMainWindow):
         self.flm_model_name = self.db.get_setting("flm_model_name", self.flm_manager.DEFAULT_MODEL)
         self.asr_provider = self.db.get_setting("asr_provider", "flm")
         self.whisper_model_name = self.db.get_setting("whisper_model", "small")
+        self.diarization_enabled = self.db.get_setting("diarization_enabled", "0") == "1"
         self.llm_provider = self.db.get_setting("llm_provider", "flm")
         self.llm_model_name = self.db.get_setting("llm_model", self.flm_model_name)
         self.llm_base_url = self.db.get_setting(
@@ -1105,6 +1175,15 @@ class MainWindow(QMainWindow):
         self.llm_thread = None
         self._pending_live_analysis = False
         self.full_transcript_buffer = ""
+        self._meeting_audio_chunks = []
+        self._meeting_mode = "online"
+        self._diarization_complete = False
+        self._diarization_thread = None
+        self._whisper_loader_thread = None
+        self._whisper_unload_thread = None
+        self._whisper_unload_complete = False
+        self._provider_install_thread = None
+        self._provider_install_name = None
         self.notified_meetings = set() # Zaten bildirim yapılan toplantılar
 
         # Dili OS'dan algıla, sonra combo ile değiştirilebilir
@@ -1531,7 +1610,8 @@ class MainWindow(QMainWindow):
             self.settings_info_label.setText(
                 f"Name: Local AI Suite\n"
                 f"Database: {self.db.db_name}\n"
-                f"ASR: {self.asr_provider} ({self.whisper_model_name})\n"
+                f"ASR: {self.asr_provider} ({self.get_effective_whisper_model()})\n"
+                f"Diarization: {'pyannote' if self.get_selected_diarization() else 'off'}\n"
                 f"LLM: {self.llm_provider} / {self.llm_model_name}\n"
                 f"Endpoint: {self.llm_base_url}\n\n"
                 "Modules:\n" + "\n".join(module_lines)
@@ -1591,8 +1671,11 @@ class MainWindow(QMainWindow):
             self.asr_provider_label.setText(t["asr_provider_label"])
             self.asr_provider_combo.setItemText(0, t["asr_provider_flm"])
             self.asr_provider_combo.setItemText(1, t["asr_provider_faster"])
+            self.asr_provider_combo.setItemText(2, t["asr_provider_whisper_v3"])
         if hasattr(self, 'whisper_model_label'):
             self.whisper_model_label.setText(t["whisper_model_label"])
+        if hasattr(self, 'diarization_checkbox'):
+            self.diarization_checkbox.setText(t["diarization_label"])
         if hasattr(self, 'llm_provider_label'):
             self.llm_provider_label.setText(t["llm_provider_label"])
             self.llm_provider_combo.setItemText(0, t["llm_provider_flm"])
@@ -1701,6 +1784,7 @@ class MainWindow(QMainWindow):
         self.asr_provider_combo = QComboBox()
         self.asr_provider_combo.addItem("FLM ASR", "flm")
         self.asr_provider_combo.addItem("Standard Whisper", "faster_whisper")
+        self.asr_provider_combo.addItem("Whisper v3 (large-v3)", "whisper_v3")
         self.asr_provider_combo.setCurrentIndex(
             max(0, self.asr_provider_combo.findData(self.asr_provider))
         )
@@ -1721,6 +1805,25 @@ class MainWindow(QMainWindow):
             "background-color: #313244; color: #CDD6F4; border: 1px solid #45475A; "
             "border-radius: 4px; padding: 4px 8px;"
         )
+
+        self.diarization_checkbox = QCheckBox()
+        self.diarization_checkbox.setChecked(self.diarization_enabled)
+        self.diarization_checkbox.toggled.connect(self.on_diarization_toggled)
+        self.diarization_checkbox.setToolTip(
+            "Requires pyannote.audio, accepted community-1 model terms, and HF_TOKEN or `hf auth login`."
+        )
+        self.diarization_checkbox.setStyleSheet("color: #BAC2DE;")
+
+        self.provider_install_status = QLabel("")
+        self.provider_install_status.setWordWrap(True)
+        self.provider_install_status.setStyleSheet("color: #89B4FA; font-size: 11px;")
+        self.provider_install_status.hide()
+        self.provider_install_progress = QProgressBar()
+        self.provider_install_progress.setRange(0, 0)
+        self.provider_install_progress.setTextVisible(False)
+        self.provider_install_progress.setFixedHeight(10)
+        self.provider_install_progress.setFixedWidth(170)
+        self.provider_install_progress.hide()
 
         self.llm_provider_label = QLabel()
         self.llm_provider_label.setStyleSheet("color: #BAC2DE;")
@@ -1775,6 +1878,9 @@ class MainWindow(QMainWindow):
         service_layout.addWidget(self.llm_endpoint_input, 1, 3, 1, 2)
         service_layout.addWidget(self.flm_model_label, 1, 5)
         service_layout.addWidget(self.flm_model_input, 1, 6)
+        service_layout.addWidget(self.diarization_checkbox, 2, 2, 1, 4)
+        service_layout.addWidget(self.provider_install_status, 3, 0, 1, 6)
+        service_layout.addWidget(self.provider_install_progress, 3, 6)
         service_layout.setColumnStretch(7, 1)
 
         # ICS URL Section
@@ -1918,10 +2024,25 @@ class MainWindow(QMainWindow):
         self.speaker_combo.setEnabled(can_edit_inputs)
         self.mode_combo.setEnabled(can_edit_inputs)
         self.btn_refresh_mics.setEnabled(can_edit_inputs)
-        provider_inputs_enabled = not self.audio_manager.is_recording and not getattr(self, "_pending_live_analysis", False)
+        install_running = bool(
+            self._provider_install_thread and self._provider_install_thread.isRunning()
+        )
+        provider_inputs_enabled = (
+            not self.audio_manager.is_recording
+            and not self.meeting_active
+            and not getattr(self, "_pending_live_analysis", False)
+            and not getattr(self, "_finishing", False)
+            and not install_running
+        )
         if hasattr(self, "asr_provider_combo"):
             self.asr_provider_combo.setEnabled(provider_inputs_enabled)
-            self.whisper_model_input.setEnabled(provider_inputs_enabled and self.get_selected_asr_provider() == "faster_whisper")
+            self.whisper_model_input.setEnabled(
+                provider_inputs_enabled and self.get_selected_asr_provider() == "faster_whisper"
+            )
+            self.diarization_checkbox.setEnabled(
+                provider_inputs_enabled
+                and self.get_selected_asr_provider() in ("faster_whisper", "whisper_v3")
+            )
             self.llm_provider_combo.setEnabled(provider_inputs_enabled)
             self.llm_endpoint_input.setEnabled(provider_inputs_enabled and self.get_selected_llm_provider() != "flm")
             self.flm_model_input.setEnabled(
@@ -1956,6 +2077,18 @@ class MainWindow(QMainWindow):
             model_name = self.whisper_model_name
         return model_name or "small"
 
+    def get_effective_whisper_model(self):
+        if self.get_selected_asr_provider() == "whisper_v3":
+            return "large-v3"
+        return self.get_selected_whisper_model()
+
+    def get_selected_diarization(self):
+        return (
+            hasattr(self, "diarization_checkbox")
+            and self.diarization_checkbox.isChecked()
+            and self.get_selected_asr_provider() in ("faster_whisper", "whisper_v3")
+        )
+
     def get_selected_llm_provider(self):
         if hasattr(self, "llm_provider_combo"):
             return self.llm_provider_combo.currentData() or "flm"
@@ -1989,8 +2122,13 @@ class MainWindow(QMainWindow):
 
     def on_asr_provider_changed(self, *_):
         self.save_provider_settings()
-        if self.get_selected_asr_provider() == "faster_whisper":
+        if self.get_selected_asr_provider() in ("faster_whisper", "whisper_v3"):
             self._prompt_missing_provider_install("faster_whisper")
+
+    def on_diarization_toggled(self, checked):
+        self.save_provider_settings()
+        if checked and self.get_selected_asr_provider() in ("faster_whisper", "whisper_v3"):
+            self._prompt_missing_provider_install("pyannote")
 
     def on_llm_provider_changed(self, *_):
         provider = self.get_selected_llm_provider()
@@ -2006,6 +2144,7 @@ class MainWindow(QMainWindow):
 
         prompt_key = {
             "faster_whisper": "install_whisper_prompt",
+            "pyannote": "install_pyannote_prompt",
             "ollama": "install_ollama_prompt",
             "lm_studio": "install_lm_studio_prompt",
         }.get(provider)
@@ -2022,9 +2161,7 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.Yes:
             return
 
-        if self._start_provider_install(provider):
-            QMessageBox.information(self, self.t("install_provider_title"), self.t("install_started"))
-        else:
+        if not self._start_provider_install(provider):
             QMessageBox.warning(self, self.t("install_provider_title"), self.t("install_unavailable"))
 
     def _provider_dependency_ready(self, provider):
@@ -2034,6 +2171,12 @@ class MainWindow(QMainWindow):
                 return True
             except Exception:
                 return False
+        if provider == "pyannote":
+            try:
+                import importlib.util
+                return importlib.util.find_spec("pyannote.audio") is not None
+            except Exception:
+                return False
         if provider == "ollama":
             return check_ollama_installed()
         if provider == "lm_studio":
@@ -2041,35 +2184,120 @@ class MainWindow(QMainWindow):
         return True
 
     def _start_provider_install(self, provider):
+        if self._provider_install_thread and self._provider_install_thread.isRunning():
+            message = self.t("install_already_running")
+            self.provider_install_status.setText(message)
+            self.provider_install_status.show()
+            self.statusBar_widget.showMessage(message)
+            return True
+
+        app_dir = os.path.dirname(os.path.dirname(__file__))
         try:
             if provider == "faster_whisper":
-                subprocess.Popen(
-                    [sys.executable, "-m", "pip", "install", "--upgrade", "faster-whisper"],
-                    cwd=os.path.dirname(os.path.dirname(__file__)),
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                command = [
+                    sys.executable, "-m", "pip", "install", "--upgrade", "faster-whisper"
+                ]
+            elif provider == "pyannote":
+                requirements_path = os.path.join(
+                    app_dir,
+                    "requirements-diarization.txt",
                 )
-                return True
-            if not shutil.which("winget"):
-                return False
-            if provider == "ollama":
-                subprocess.Popen([
+                command = [sys.executable, "-m", "pip", "install", "-r", requirements_path]
+            elif provider == "ollama":
+                if not shutil.which("winget"):
+                    return False
+                command = [
                     "winget", "install", "--id", "Ollama.Ollama", "-e",
                     "--accept-package-agreements", "--accept-source-agreements",
-                ])
-                return True
-            if provider == "lm_studio":
-                subprocess.Popen([
+                ]
+            elif provider == "lm_studio":
+                if not shutil.which("winget"):
+                    return False
+                command = [
                     "winget", "install", "--name", "LM Studio",
                     "--accept-package-agreements", "--accept-source-agreements",
-                ])
-                return True
-        except Exception:
+                ]
+            else:
+                return False
+
+            display_name = self._provider_display_name(provider)
+            worker = ProviderInstallWorker(command, app_dir, self)
+            worker.output_received.connect(self._on_provider_install_output)
+            worker.completed.connect(self._on_provider_install_completed)
+            worker.finished.connect(lambda w=worker: self._on_provider_install_finished(w))
+            self._provider_install_thread = worker
+            self._provider_install_name = provider
+
+            message = self.t("install_running").format(provider=display_name)
+            self.provider_install_status.setText(message)
+            self.provider_install_status.setStyleSheet("color: #89B4FA; font-size: 11px;")
+            self.provider_install_status.show()
+            self.provider_install_progress.setRange(0, 0)
+            self.provider_install_progress.setTextVisible(False)
+            self.provider_install_progress.show()
+            self.statusBar_widget.showMessage(message)
+            worker.start()
+            self._sync_capture_control_states()
+            return True
+        except Exception as exc:
+            self.provider_install_status.setText(str(exc))
+            self.provider_install_status.setStyleSheet("color: #F38BA8; font-size: 11px;")
+            self.provider_install_status.show()
             return False
-        return False
+
+    def _provider_display_name(self, provider):
+        return {
+            "faster_whisper": "Whisper / faster-whisper",
+            "pyannote": "Pyannote diarization",
+            "ollama": "Ollama",
+            "lm_studio": "LM Studio",
+        }.get(provider, provider)
+
+    def _on_provider_install_output(self, line):
+        provider = self._provider_display_name(self._provider_install_name)
+        compact = " ".join((line or "").split())
+        if len(compact) > 180:
+            compact = compact[:177] + "..."
+        message = f"{provider}: {compact}"
+        self.provider_install_status.setText(message)
+        self.statusBar_widget.showMessage(message)
+
+    def _on_provider_install_completed(self, success, detail):
+        provider_key = self._provider_install_name
+        provider = self._provider_display_name(provider_key)
+        compact_detail = " ".join((detail or "").split())
+        if len(compact_detail) > 240:
+            compact_detail = compact_detail[-240:]
+
+        self.provider_install_progress.setRange(0, 100)
+        self.provider_install_progress.setValue(100 if success else 0)
+        self.provider_install_progress.setTextVisible(True)
+        self.provider_install_progress.setFormat("✓" if success else "✗")
+
+        if success:
+            message = self.t("install_success").format(provider=provider)
+            self.provider_install_status.setStyleSheet("color: #A6E3A1; font-size: 11px;")
+        else:
+            message = self.t("install_failed").format(
+                provider=provider,
+                detail=compact_detail or "bilinmeyen hata",
+            )
+            self.provider_install_status.setStyleSheet("color: #F38BA8; font-size: 11px;")
+        self.provider_install_status.setText(message)
+        self.statusBar_widget.showMessage(message)
+
+    def _on_provider_install_finished(self, worker):
+        if self._provider_install_thread is worker:
+            self._provider_install_thread = None
+            self._provider_install_name = None
+        self._sync_capture_control_states()
 
     def save_provider_settings(self, *_):
         self.asr_provider = self.get_selected_asr_provider()
         self.whisper_model_name = self.get_selected_whisper_model()
+        self.diarization_enabled = bool(
+            hasattr(self, "diarization_checkbox") and self.diarization_checkbox.isChecked()
+        )
         self.llm_provider = self.get_selected_llm_provider()
         self.llm_base_url = self.get_selected_llm_base_url()
         self.llm_model_name = self.get_selected_llm_model()
@@ -2080,6 +2308,7 @@ class MainWindow(QMainWindow):
 
         self.db.save_setting("asr_provider", self.asr_provider)
         self.db.save_setting("whisper_model", self.whisper_model_name)
+        self.db.save_setting("diarization_enabled", "1" if self.diarization_enabled else "0")
         self.db.save_setting("llm_provider", self.llm_provider)
         self.db.save_setting("llm_base_url", self.llm_base_url)
         self.db.save_setting("llm_model", self.llm_model_name)
@@ -2162,12 +2391,24 @@ class MainWindow(QMainWindow):
             if self.get_selected_asr_provider() == "flm" and not self.flm_manager.is_ready:
                 self.statusBar_widget.showMessage(self.t("flm_required_status"))
                 return
+            if self.get_selected_asr_provider() in ("faster_whisper", "whisper_v3"):
+                if not self._provider_dependency_ready("faster_whisper"):
+                    self._prompt_missing_provider_install("faster_whisper")
+                    return
+            if self.get_selected_diarization() and not self._provider_dependency_ready("pyannote"):
+                self._prompt_missing_provider_install("pyannote")
+                return
 
             mode = "online" if self.mode_combo.currentIndex() == 0 else "mic_only"
+            self._meeting_mode = mode
             
             # Eğer uygulama 'yeni toplantı' modundaysa (yani BİTİR butonu kapalıysa) ekranı temizle
             if not self.btn_finish_meeting.isEnabled():
                 self.full_transcript_buffer = ""
+                self._meeting_audio_chunks = []
+                self._diarization_complete = False
+                self._diarization_thread = None
+                self._whisper_unload_complete = False
                 self._last_transcript_text = None
                 self._last_transcript_source = None
                 self.subtitle_box.clear()
@@ -2177,6 +2418,7 @@ class MainWindow(QMainWindow):
                 
             self.meeting_active = True
             self._update_note_taker_status()
+            self._start_whisper_for_meeting()
             self.audio_manager.start_recording(mode, self.mic_combo.currentData(), self.speaker_combo.currentData())
             self.btn_start_record.setText(self.t("btn_pause_rec"))
             self.btn_start_record.setStyleSheet("background-color: #F9E2AF; color: #11111B;")
@@ -2216,8 +2458,20 @@ class MainWindow(QMainWindow):
                 # Hala devam ediyor, bitince yeniden tetiklenecek
                 self.statusBar_widget.showMessage(self.t("analyzing_status") + " (Son transkriptler işleniyor...)")
                 return
+
+            if self.get_selected_diarization() and not self._diarization_complete:
+                if self._diarization_thread is None:
+                    self._start_diarized_transcription()
+                return
+            if self._diarization_thread is not None:
+                # The result signal arrives just before QThread fully exits. Wait for
+                # finished so no inference code still holds the Whisper model.
+                return
             
             # Kuyruk bitti, LLM'i başlat!
+            if not self._ensure_whisper_unloaded_before_llm():
+                return
+
             self._finishing = False
             color_warn = "#F9E2AF"
             llm_config = self.get_selected_llm_config()
@@ -2310,10 +2564,124 @@ class MainWindow(QMainWindow):
 
     # ─── ASR ─────────────────────────────────────────────────────────────────
 
+    def _start_whisper_for_meeting(self):
+        if self.get_selected_asr_provider() not in ("faster_whisper", "whisper_v3"):
+            return
+
+        model_name = self.get_effective_whisper_model()
+        if FasterWhisperModelCache.is_loaded(model_name):
+            self.statusBar_widget.showMessage(
+                self.t("whisper_ready").format(model=model_name)
+            )
+            return
+        if self._whisper_loader_thread and self._whisper_loader_thread.isRunning():
+            return
+
+        message = self.t("whisper_starting").format(model=model_name)
+        self.statusBar_widget.showMessage(message)
+        self.subtitle_box.append(f"<i>[{message}]</i>")
+        worker = WhisperModelLifecycleThread("load", model_name, self)
+        worker.finished.connect(lambda w=worker: self._on_whisper_loader_finished(w))
+        self._whisper_loader_thread = worker
+        worker.start()
+
+    def _on_whisper_loader_finished(self, worker):
+        if self._whisper_loader_thread is worker:
+            self._whisper_loader_thread = None
+        if worker.success:
+            message = self.t("whisper_ready").format(model=worker.model_name)
+        else:
+            message = self.t("whisper_start_failed").format(
+                model=worker.model_name,
+                error=worker.error_message,
+            )
+        self.statusBar_widget.showMessage(message)
+        worker.deleteLater()
+
+    def _ensure_whisper_unloaded_before_llm(self):
+        if self.get_selected_asr_provider() not in ("faster_whisper", "whisper_v3"):
+            return True
+        if self._whisper_unload_complete:
+            return True
+        if self._whisper_unload_thread and self._whisper_unload_thread.isRunning():
+            return False
+
+        model_name = self.get_effective_whisper_model()
+        message = self.t("whisper_stopping").format(model=model_name)
+        self.statusBar_widget.showMessage(message)
+        self.subtitle_box.append(f"<i>[{message}]</i>")
+        worker = WhisperModelLifecycleThread("unload", model_name, self)
+        worker.finished.connect(lambda w=worker: self._on_whisper_unload_finished(w))
+        self._whisper_unload_thread = worker
+        worker.start()
+        return False
+
+    def _on_whisper_unload_finished(self, worker):
+        if self._whisper_unload_thread is worker:
+            self._whisper_unload_thread = None
+        self._whisper_unload_complete = True
+        if worker.success:
+            message = self.t("whisper_stopped").format(model=worker.model_name)
+        else:
+            message = self.t("whisper_stop_failed").format(
+                model=worker.model_name,
+                error=worker.error_message,
+            )
+        self.statusBar_widget.showMessage(message)
+        worker.deleteLater()
+        if getattr(self, "_finishing", False):
+            self._check_asr_and_start_llm()
+
+    def _start_diarized_transcription(self):
+        if not self._meeting_audio_chunks:
+            self._diarization_complete = True
+            self._check_asr_and_start_llm()
+            return
+
+        lang = "tr" if self.lang_combo.currentIndex() == 0 else "en"
+        self._diarization_thread = DiarizedTranscriptionThread(
+            self._meeting_audio_chunks,
+            language=lang,
+            whisper_model=self.get_effective_whisper_model(),
+        )
+        self._diarization_thread.progress.connect(self.on_analysis_progress)
+        self._diarization_thread.transcription_ready.connect(self._on_diarization_ready)
+        self._diarization_thread.transcription_error.connect(self._on_diarization_error)
+        self._diarization_thread.finished.connect(self._clear_diarization_thread)
+        self._diarization_thread.start()
+
+    def _clear_diarization_thread(self):
+        self._diarization_thread = None
+        if getattr(self, "_finishing", False):
+            self._check_asr_and_start_llm()
+
+    def _on_diarization_ready(self, transcript):
+        self.full_transcript_buffer = transcript.strip() + "\n"
+        self._diarization_complete = True
+        notice = (
+            "<i>[Pyannote konuşmacı ayrımı tamamlandı; transkript güncellendi.]</i>"
+            if self._lang == "tr"
+            else "<i>[Pyannote speaker diarization completed; transcript updated.]</i>"
+        )
+        self.subtitle_box.append(notice)
+
+    def _on_diarization_error(self, message):
+        self._diarization_complete = True
+        self.statusBar_widget.showMessage(message)
+        self.subtitle_box.append(
+            f"<i style='color:#F9E2AF;'>[{message} Canlı transkript kullanılacak.]</i>"
+        )
+
     def on_audio_chunk_ready(self, wav_bytes, source_label):
         # Toplantı bitip analiz de başladıktan sonra gelen çok geçikmiş paketleri yoksay
         if not self.meeting_active and not getattr(self, '_finishing', False):
             return
+        if self.get_selected_diarization():
+            diarization_source = source_label
+            if self._meeting_mode == "mic_only" and source_label == "BEN":
+                # A room microphone may contain several people; let pyannote separate all of them.
+                diarization_source = "MIXED_MIC"
+            self._meeting_audio_chunks.append((wav_bytes, diarization_source))
         # Paketleri sıraya al (Queue)
         self.asr_queue.append((wav_bytes, source_label))
         self._process_asr_queue()
@@ -2331,7 +2699,7 @@ class MainWindow(QMainWindow):
                 source_label,
                 language=lang,
                 provider=self.get_selected_asr_provider(),
-                whisper_model=self.get_selected_whisper_model(),
+                whisper_model=self.get_effective_whisper_model(),
             )
             worker.transcription_ready.connect(self.append_subtitle)
             worker.transcription_error.connect(self.show_asr_error)
@@ -2408,6 +2776,22 @@ class MainWindow(QMainWindow):
         if self.llm_thread and self.llm_thread.isRunning():
             try:
                 self.llm_thread.wait(500)
+            except Exception: pass
+        if self._diarization_thread and self._diarization_thread.isRunning():
+            try:
+                self._diarization_thread.wait(500)
+            except Exception: pass
+        if self._provider_install_thread and self._provider_install_thread.isRunning():
+            try:
+                self._provider_install_thread.wait(500)
+            except Exception: pass
+        if self._whisper_loader_thread and self._whisper_loader_thread.isRunning():
+            try:
+                self._whisper_loader_thread.wait(500)
+            except Exception: pass
+        if self._whisper_unload_thread and self._whisper_unload_thread.isRunning():
+            try:
+                self._whisper_unload_thread.wait(500)
             except Exception: pass
         event.accept()
 

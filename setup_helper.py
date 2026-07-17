@@ -261,6 +261,7 @@ print()
 print("[5/5] Opsiyonel yerel AI saglayicilari kontrol ediliyor...")
 gpu = detect_gpu_vendor()
 print("[OK]  Standart Whisper (faster-whisper) Python kutuphanesi hazir." if check_python_package("faster_whisper") else "[UYARI] faster-whisper bulunamadi. requirements kurulumu kontrol edilmeli.")
+print("[OK]  Pyannote diarization hazir." if check_python_package("pyannote.audio") else "[INFO] Pyannote diarization opsiyonel; uygulamadaki secenek acilinca kurulabilir.")
 
 ollama_ok = ollama_installed()
 lm_studio_ok = lm_studio_installed()

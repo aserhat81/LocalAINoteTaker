@@ -12,13 +12,15 @@ class LlmAnalyzerThread(QThread):
     MODEL_NAME = "qwen3.5:4b"
 
     # qwen3.5:4b icin daha genis baglam kullan; erken sikistirmayi azalt.
-    MAX_DIRECT_TRANSCRIPT_CHARS = 18000
-    MAX_CHARS_PER_CHUNK = 14000
-    MAX_MERGE_INPUT_CHARS = 24000
+    MAX_DIRECT_TRANSCRIPT_CHARS = 6000
+    MAX_CHARS_PER_CHUNK = 10000
+    MAX_MERGE_INPUT_CHARS = 22000
+    MAX_REVIEW_INPUT_CHARS = 28000
 
-    MAP_OUTPUT_TOKENS = 1800
-    MERGE_OUTPUT_TOKENS = 2200
-    FINAL_OUTPUT_TOKENS = 3400
+    MAP_OUTPUT_TOKENS = 3000
+    MERGE_OUTPUT_TOKENS = 3600
+    FINAL_OUTPUT_TOKENS = 4800
+    REVIEW_OUTPUT_TOKENS = 4800
     API_TIMEOUT_SECONDS = 18000
 
     LANG_CONFIG = {
@@ -50,7 +52,8 @@ class LlmAnalyzerThread(QThread):
                 "- Uydurma yapma.\n"
                 "- Emin degilsen 'transkriptte net degil' yaz.\n"
                 "- Bilgi hic yoksa 'belirtilmedi' yaz.\n"
-                "- Kisa ama kayipsiz ol.\n"
+                "- Her benzersiz konuyu ayri bir madde olarak yaz; az bahsedilen konulari da atlama.\n"
+                "- Maddeleri transkriptteki gorusme sirasina yakin tut.\n"
                 "- Detayli gorusme notlarinda konu bazli ara detaylari, gerekceleri, ornekleri ve baglami koru.\n"
                 "- Aksiyon, sorumlu, termin, tarih, risk, blokaj ve acik kalan maddeleri ozellikle ayikla.\n"
                 "- Her maddede mumkun oldugunca hangi konudan geldigi anlasilsin.\n\n"
@@ -88,6 +91,7 @@ class LlmAnalyzerThread(QThread):
                 "Bunlari TEK bir yapiya birlestir.\n"
                 "Kurallar:\n"
                 "- Hicbir benzersiz konuyu, karari, aksiyonu, tarihi, sorumluyu, riski veya acik konuyu dusurme.\n"
+                "- Bir parçada yalnızca bir kez gecen kucuk/yan konulari da koru.\n"
                 "- Detayli gorusme notlarindaki ara gerekceleri, ornekleri, sayisal bilgileri ve konu baglamlarini koru.\n"
                 "- Tekrarlari birlestir ama bilgi kaybetme.\n"
                 "- Supheli yerlerde 'transkriptte net degil' ifadesini koru.\n"
@@ -120,6 +124,7 @@ class LlmAnalyzerThread(QThread):
                 "- Detaylı Görüşme Notları bolumunde konu bazli ara detaylari, gerekceleri, ornekleri, sayisal bilgileri ve kimin neyi neden soyledigini kayipsiz aktar.\n"
                 "- Aksiyonlari ve sahiplerini mumkun oldugunca yakala.\n"
                 "- Tarih, saat, teslim tarihi ve yapilacaklari ozellikle ayikla.\n"
+                "- Transkriptteki HER benzersiz konu Detaylı Görüşme Notları veya ilgili özel bölümde görünmeli.\n"
                 "- Kurumsal, profesyonel Turkce kullan.\n\n"
                 "Ham Transkript:\n{transcript}"
             ),
@@ -146,10 +151,30 @@ class LlmAnalyzerThread(QThread):
                 "- Detaylı Görüşme Notları bolumunde parcalardan gelen konu bazli detaylari, gerekceleri, ornekleri ve sayisal bilgileri ozellikle koru.\n"
                 "- Belirsizse 'transkriptte net degil', yoksa 'belirtilmedi' yaz.\n"
                 "- Tekrarlari temizle, anlami bozma.\n"
+                "- Kaynaktaki HER benzersiz konu nihai notta en az bir kez görünmeli; az bahsedilen yan konuları atlama.\n"
                 "- Kurumsal, profesyonel Turkce kullan.\n\n"
                 "Birlestirilmis Not Malzemesi:\n{material}"
             ),
+            "review_system": (
+                "Sen bir toplanti notu kapsam denetcisisin. Taslagi kaynak malzemeyle karsilastirir, "
+                "eksik kalan tum destekli konulari ekleyerek eksiksiz nihai notu yeniden yazarsin. "
+                "Kaynakta olmayan bilgi eklemezsin."
+            ),
+            "review_prompt": (
+                "Asagida kaynak malzeme ve bu malzemeden uretilmis bir taslak var.\n"
+                "Taslagi bastan sona denetle ve TAMAMLANMIS NIHAYI NOTU yeniden yaz.\n"
+                "Kurallar:\n"
+                "- Kaynaktaki her benzersiz konu, karar, gerekce, ornek, sayi, tarih, aksiyon, sorumlu, risk ve acik madde taslakta var mi kontrol et.\n"
+                "- Eksik veya fazla sikistirilmis noktalarin tamamini uygun bolume ekle.\n"
+                "- Taslaktaki destekli bilgileri kaybetme; yalnizca tekrarlari birlestir.\n"
+                "- Ilk iki satir BAŞLIK: ve KATILIMCILAR: biciminde kalsin; mevcut bolum yapisini koru.\n"
+                "- Kaynakta olmayan bilgi ekleme.\n\n"
+                "KAYNAK MALZEME:\n{material}\n\n"
+                "DENETLENECEK TASLAK:\n{draft}"
+            ),
             "final_progress": "Nihai toplanti notu olusturuluyor...",
+            "review_progress": "Konu atlanmadigini doğrulamak icin kapsam denetimi yapiliyor...",
+            "review_fallback": "Kapsam denetimi tamamlanamadi; ilk ayrintili taslak korunuyor.",
             "long_progress": "Uzun toplanti tespit edildi. Parca bazli toplanti notlari cikartilip birlestiriliyor...",
             "chunk_progress": "Parca {current}/{total} isleniyor...",
             "merge_progress": "Parcali notlar birlestiriliyor: {current}/{total}...",
@@ -183,7 +208,8 @@ class LlmAnalyzerThread(QThread):
                 "- Do not hallucinate.\n"
                 "- If uncertain, write 'not clear from transcript'.\n"
                 "- If absent, write 'not specified'.\n"
-                "- Keep it concise but loss-minimized.\n"
+                "- Write every distinct topic as a separate item, including briefly mentioned side topics.\n"
+                "- Keep items close to transcript order.\n"
                 "- Preserve topic-level discussion details, rationale, examples, numbers, and context in Detailed Discussion Notes.\n"
                 "- Pay special attention to actions, owners, deadlines, dates, risks, blockers, and open items.\n\n"
                 "Use this structure:\n"
@@ -220,6 +246,7 @@ class LlmAnalyzerThread(QThread):
                 "Merge them into a single structured note set.\n"
                 "Rules:\n"
                 "- Do not drop any unique topic, decision, action, date, owner, risk, or open issue.\n"
+                "- Preserve small side topics even when they occur in only one chunk.\n"
                 "- Preserve detailed discussion notes, including rationale, examples, numbers, and context.\n"
                 "- Merge duplicates without losing detail.\n"
                 "- Preserve uncertainty labels.\n"
@@ -251,6 +278,7 @@ class LlmAnalyzerThread(QThread):
                 "- Remove unnecessary repetition.\n"
                 "- In Detailed Discussion Notes, keep topic-level details, rationale, examples, numbers, and who said what/why when supported by the transcript.\n"
                 "- Capture actions, owners, dates, times, and deadlines as much as possible.\n"
+                "- EVERY distinct transcript topic must appear in Detailed Discussion Notes or its relevant dedicated section.\n"
                 "- Use professional corporate English.\n\n"
                 "Raw Transcript:\n{transcript}"
             ),
@@ -277,10 +305,30 @@ class LlmAnalyzerThread(QThread):
                 "- In Detailed Discussion Notes, preserve detailed topic context, rationale, examples, and numbers from the structured notes.\n"
                 "- If unclear, write 'not clear from transcript'; if absent, write 'not specified'.\n"
                 "- Remove repetition without changing meaning.\n"
+                "- Every distinct source topic must appear at least once; do not omit briefly discussed side topics.\n"
                 "- Use professional corporate English.\n\n"
                 "Structured Notes:\n{material}"
             ),
+            "review_system": (
+                "You are a meeting-notes coverage auditor. Compare a draft against its source material "
+                "and rewrite the complete final notes with every supported omission restored. "
+                "Never add unsupported information."
+            ),
+            "review_prompt": (
+                "Below are source material and a draft produced from it.\n"
+                "Audit the whole draft and rewrite the COMPLETE FINAL NOTES.\n"
+                "Rules:\n"
+                "- Check every unique topic, decision, rationale, example, number, date, action, owner, risk, and open item from the source.\n"
+                "- Restore every missing or over-compressed point in the appropriate section.\n"
+                "- Keep all supported draft information; merge only genuine repetition.\n"
+                "- Keep the first two TITLE: and PARTICIPANTS: lines and the existing section structure.\n"
+                "- Do not add unsupported information.\n\n"
+                "SOURCE MATERIAL:\n{material}\n\n"
+                "DRAFT TO AUDIT:\n{draft}"
+            ),
             "final_progress": "Generating final meeting notes...",
+            "review_progress": "Running a coverage audit to verify no topics were omitted...",
+            "review_fallback": "Coverage audit could not finish; keeping the first detailed draft.",
             "long_progress": "Long meeting detected. Extracting and merging chunk-based meeting notes...",
             "chunk_progress": "Processing chunk {current}/{total}...",
             "merge_progress": "Merging chunk notes: {current}/{total}...",
@@ -346,12 +394,31 @@ class LlmAnalyzerThread(QThread):
 
             self.analysis_progress.emit(cfg["final_progress"])
             content = self._generate_final_report(source_material, cfg, use_structured_merge)
+            if len(source_material) + len(content) <= self.MAX_REVIEW_INPUT_CHARS:
+                self.analysis_progress.emit(cfg["review_progress"])
+                try:
+                    reviewed_content = self._call_llm(
+                        system_prompt=cfg["review_system"],
+                        user_prompt=cfg["review_prompt"].format(
+                            material=source_material,
+                            draft=content,
+                        ),
+                        max_tokens=self.REVIEW_OUTPUT_TOKENS,
+                    )
+                    if reviewed_content.strip():
+                        content = reviewed_content
+                except Exception:
+                    self.analysis_progress.emit(cfg["review_fallback"])
             self._parse_and_emit(content, cfg)
         except Exception as e:
             self.analysis_error.emit(f"{cfg['error_prefix']}: {str(e)}")
 
     def _build_structured_context(self, cfg):
-        chunks = self._split_transcript(self.transcript, self.MAX_CHARS_PER_CHUNK)
+        chunks = self._split_transcript(
+            self.transcript,
+            self.MAX_CHARS_PER_CHUNK,
+            overlap_lines=2,
+        )
         total_chunks = len(chunks)
         extracted_notes = []
 
@@ -416,24 +483,25 @@ class LlmAnalyzerThread(QThread):
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
 
-    def _split_transcript(self, text, max_len):
-        lines = text.split("\n")
+    def _split_transcript(self, text, max_len, overlap_lines=0):
         chunks = []
-        current_chunk = ""
+        current_lines = []
 
-        for line in lines:
-            if len(current_chunk) + len(line) + 1 > max_len:
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-                    current_chunk = line + "\n"
-                else:
-                    chunks.append(line[:max_len])
-                    current_chunk = line[max_len:] + "\n"
-            else:
-                current_chunk += line + "\n"
+        for line in text.split("\n"):
+            line_parts = [line[i:i + max_len] for i in range(0, len(line), max_len)] or [""]
+            for part in line_parts:
+                candidate = "\n".join(current_lines + [part])
+                if current_lines and len(candidate) > max_len:
+                    chunks.append("\n".join(current_lines).strip())
+                    overlap = current_lines[-overlap_lines:] if overlap_lines else []
+                    while overlap and len("\n".join(overlap + [part])) > max_len:
+                        overlap.pop(0)
+                    current_lines = overlap
+                current_lines.append(part)
 
-        if current_chunk.strip():
-            chunks.append(current_chunk.strip())
+        final_chunk = "\n".join(current_lines).strip()
+        if final_chunk:
+            chunks.append(final_chunk)
 
         return chunks
 
